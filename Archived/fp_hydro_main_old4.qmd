@@ -1,0 +1,654 @@
+---
+title: "Fengping River Hydropower — Main Analysis"
+subtitle: "Financial Feasibility Frontier under Hydrological Variability"
+author: "[your name]"
+date: today
+format:
+  pdf:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    fig-pos: "H"
+    geometry: margin=2.5cm
+    fontsize: 11pt
+editor: source
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: true
+---
+
+```{r setup}
+#| cache: false
+
+# ── Packages ──────────────────────────────────────────────────────────────────
+pkgs <- c("tidyverse", "here", "patchwork", "scales", "lubridate", "zoo")
+for (p in pkgs) {
+  if (!requireNamespace(p, quietly = TRUE)) install.packages(p)
+}
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+# Suppress Windows encoding warnings from system messages
+options(warn = 0)
+
+# ── Modules ───────────────────────────────────────────────────────────────────
+source(here("module", "hydro_reservoir.R"))
+source(here("module", "hydro_sediment.R"))
+source(here("module", "hydro_finance.R"))
+source(here("module", "hydro_climate.R"))
+source(here("module", "hydro_plot.R"))
+source(here("module", "hydro_test.R"))
+
+# Run all tests before any analysis — stops execution on failure
+run_all_tests()
+```
+
+```{r load-data}
+#| cache: false
+
+# ── Input data ─────────────────────────────────────────────────────────────
+daily_clean  <- read_csv(here("data", "lishan_daily_clean.csv"),
+                         show_col_types = FALSE) |>
+  mutate(date = as.Date(date))
+
+decadal_long <- read_csv(here("data", "lishan_decadal_long.csv"),
+                         show_col_types = FALSE)
+
+sed_clean    <- read_csv(here("data", "sediment_clean.csv"),
+                         show_col_types = FALSE)
+
+rc_params    <- read_csv(here("data", "rating_curve_params.csv"),
+                         show_col_types = FALSE)
+
+weir_design  <- read_csv(here("data", "weir_design_flow.csv"),
+                         show_col_types = FALSE)
+
+# ── Global financial parameters ────────────────────────────────────────────
+# Two CAPEX scenarios (see Section 5):
+#   CAPEX_EIA  : original EIA estimate (1999, NTD 6.4B)
+#   CAPEX_2025 : updated investor-conference estimate (2025, NTD 9.7B)
+CAPEX_EIA    <- 6.4e9
+CAPEX_2025   <- 9.7e9
+OPEX_NTD_YR  <- CAPEX_2025 * 0.01      # 1% of updated CAPEX as O&M rule of thumb
+FIT          <- 6    #change to PPA rate              # 2.8599 NTD/kWh (MOEA 114年度, > 20 MW class)
+LTV          <- 0.80                    # 80% debt financing
+R_EQUITY     <- 0.08                    # equity discount rate
+PROJECT_LIFE <- 35L                     # years (EIA design life)
+R_LOAN_SEQ   <- seq(0, 0.10, by = 0.01) # 0%–10% in 1% steps (FFF X-axis)
+E_FLOW_MODE  <- "recommended"           # W1 = 5.0 cms; W2 = 1.0 cms
+
+# =============================================================================
+# SPEED CONTROL — adjust these two parameters to trade off speed vs precision
+# =============================================================================
+#
+# N_SIM_BOOTSTRAP : bootstrap replicates per CV level
+#   Quick test  (dev / first run)   :   20  →   60–140 simulations  (~1 min)
+#   Assignment submission           :  200  →  1400 simulations      (~5 min)
+#   Publication-quality             : 1000  →  7000 simulations      (~20 min)
+#
+# CV_GRID_USE : CV levels on the FFF Y-axis
+#   Reduced (3 levels, faster)      : c(1.5, 2.5, 3.5)
+#   Full    (7 levels, publication) : c(1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0)
+#
+# Recommended workflow:
+#   1. First run:  N_SIM = 20L,  CV_GRID = c(1.5, 2.5, 3.5)  → ~1 min
+#   2. Submission: N_SIM = 200L, CV_GRID = c(1.0,...,4.0)     → ~5 min
+#   3. Paper:      N_SIM = 1000L, CV_GRID = c(1.0,...,4.0)    → ~20 min
+# =============================================================================
+
+N_SIM_BOOTSTRAP <- 20L                         # ← 20 / 200 / 1000
+CV_GRID_USE     <- c(1.5, 2.5, 3.5)            # ← c(1.5,2.5,3.5) / c(1.0,1.5,2.0,2.5,3.0,3.5,4.0)
+```
+
+# Sediment and Rating Curve
+
+## Suspended Sediment Rating Curve
+
+The suspended sediment load (SSL, MT/day) is estimated from daily discharge
+$Q$ (cms) via a power-law rating curve calibrated on 492 field observations
+(1959–2023):
+
+$$SSL = a \cdot Q^b$$
+
+fitted by ordinary least squares in log-log space.  Only observations flagged
+`ok` with detectable sediment concentration are used; below-detection-limit
+records are excluded.
+
+```{r rating-curve}
+#| fig-width: 7
+#| fig-height: 5
+#| fig-cap: "Suspended sediment rating curve for Fengping Creek. Each point is one field sampling event (n = 492, flag == 'ok'). The exponent b = 1.51 falls within the range [1.4, 2.5] documented for Taiwan mountain streams (Wang & Kondolf 2014; Kondolf et al. 2014)."
+
+# Retrieve pre-fitted parameters
+a_rc <- rc_params$value[rc_params$parameter == "a"]
+b_rc <- rc_params$value[rc_params$parameter == "b"]
+r2   <- rc_params$value[rc_params$parameter == "r_squared"]
+n_rc <- as.integer(rc_params$value[rc_params$parameter == "n_points"])
+
+# Fitted line for overlay
+fit_line <- data.frame(
+  Discharge_CMS = 10 ^ seq(log10(2), log10(600), length.out = 300)
+) |>
+  mutate(SSL = a_rc * Discharge_CMS ^ b_rc)
+
+sed_clean |>
+  filter(flag == "ok", Sus_Load_MTDay > 0) |>
+  ggplot(aes(x = Discharge_CMS, y = Sus_Load_MTDay)) +
+  geom_point(alpha = 0.55, colour = "#1D9E75", size = 1.8) +
+  geom_line(data = fit_line, aes(x = Discharge_CMS, y = SSL),
+            colour = "#D85A30", linewidth = 1.0) +
+  scale_x_log10(labels = comma) +
+  scale_y_log10(labels = comma) +
+  labs(
+    title    = "Suspended Sediment Rating Curve — Fengping Creek (1959–2023)",
+    subtitle = sprintf(
+      "SSL = %.3f \u00d7 Q^%.3f  |  R\u00b2 = %.3f  |  n = %d",
+      a_rc, b_rc, r2, n_rc),
+    x       = "Discharge Q (cms, log scale)",
+    y       = "Suspended sediment load SSL (MT/day, log scale)",
+    caption = paste(
+      "b within expected range [1.4, 2.5] for Taiwan mountain streams.",
+      "\nWang & Kondolf (2014) JAWRA 50(3):735\u2013747;",
+      "Kondolf et al. (2014) Earth's Future 2(5):256\u2013280."
+    )
+  ) +
+  theme_fengping()
+```
+
+## Reservoir Sedimentation — W1 and W2
+
+Trap efficiency $TE$ is computed annually using the Brune (1953) curve:
+
+$$TE_t = \frac{CI_t}{CI_t + 0.0021}, \quad CI_t = \frac{S_t}{V_{\text{annual}}}$$
+
+where $S_t$ is the remaining effective storage (m³) and $V_{\text{annual}}$
+is the mean annual inflow volume.
+
+```{r sediment-outputs}
+sed_out <- build_sediment_outputs(
+  sed_csv_path = here("data", "sediment_clean.csv"),
+  daily_flow   = daily_clean,
+  plot_fit     = FALSE
+)
+```
+
+```{r trap-plot}
+#| fig-width: 8
+#| fig-height: 5
+#| fig-cap: "Simulated trap efficiency (TE) and remaining effective storage for W1 and W2 over the 35-year project lifetime. Brune (1953) curve approximation; deposit bulk density = 1300 kg/m³ (Wang et al. 2018)."
+
+plot_trap_efficiency(sed_out$trap_W1, sed_out$trap_W2)
+```
+
+```{r sediment-table}
+#| tbl-cap: "Trap efficiency and remaining storage at key project milestones."
+
+bind_rows(
+  sed_out$trap_W1 |> mutate(weir = "W1 (Lower)"),
+  sed_out$trap_W2 |> mutate(weir = "W2 (Upper)")
+) |>
+  filter(year %in% c(1, 10, 20, 35)) |>
+  select(weir, year,
+         "Storage remaining (m³)" = S_remaining_m3,
+         "TE" = TE,
+         "Volume loss (m³/yr)" = V_loss_m3_yr) |>
+  knitr::kable(digits = c(0, 0, 0, 3, 0), format.args = list(big.mark = ","))
+```
+
+---
+
+# Reservoir Simulation — Historical Baseline
+
+The pondage simulation (`simulate_one_weir()`) uses a daily Euler forward
+water balance with a strict dispatch priority: (1) ecological flow, (2) power
+generation up to $Q_{\text{design}}$, (3) spillage.
+
+The 24-hour forecast model (`simulate_one_weir_forward24()`) additionally
+looks ahead one day to decide how much water to retain, reducing spill during
+high-flow events while smoothing generation during droughts.
+
+Both models are run on the full historical record (1958–2025) with the
+**recommended ecological flow** (W1 = 5.0 cms, W2 = 1.0 cms).
+
+```{r baseline-sim}
+sim_ror  <- run_reservoir_simulation(
+  daily_flow  = daily_clean,
+  e_flow_mode = E_FLOW_MODE
+)
+
+sim_pond <- run_reservoir_simulation_forward24(
+  daily_flow  = daily_clean,
+  e_flow_mode = E_FLOW_MODE,
+  scale_w2    = TRUE
+)
+```
+
+## Operation Window — Interactive Date Selection
+
+Change `START_DATE` and `END_DATE` to inspect any period of interest.
+
+```{r operation-window}
+#| fig-width: 9
+#| fig-height: 6
+#| fig-cap: "W1 reservoir operation during a representative typhoon-season window. Line = inflow; stacked areas = ecological flow, power diversion, and spill. Lower panels show storage trajectory and daily energy."
+
+# ── Adjust these dates to explore different periods ──────────────────────
+START_DATE <- "2010-08-01"
+END_DATE   <- "2010-08-31"
+# ─────────────────────────────────────────────────────────────────────────
+
+plot_operation_window(
+  sim_df     = sim_pond$W1,
+  start_date = START_DATE,
+  end_date   = END_DATE,
+  title_text = sprintf("W1 Pondage Operation — %s to %s", START_DATE, END_DATE)
+)
+```
+
+## Annual Energy — Calendar Heatmap
+
+```{r heatmap}
+#| fig-width: 10
+#| fig-height: 8
+#| fig-cap: "Calendar heatmap of daily energy generation for W1 (pondage mode, 1958–2025). Dark = high generation; grey = near-zero. Typhoon-season pulses visible as dark horizontal bands in July–September."
+
+plot_energy_calendar_heatmap(sim_pond$W1, weir_label = "W1")
+```
+
+## Annual Generation Summary — Run-of-River vs Pondage
+
+```{r annual-gen-table}
+#| tbl-cap: "Annual generation statistics for both weirs combined (W1 + W2). Run-of-river = immediate dispatch; Pondage = 24-hour forecast-informed dispatch. Historical record 1958–2025."
+
+ann_ror <- sim_ror$combined |>
+  mutate(year = year(date)) |>
+  group_by(year) |>
+  summarise(
+    gwh_total   = sum(energy_kwh_total, na.rm = TRUE) / 1e6,
+    rev_ntd     = sum(energy_kwh_total, na.rm = TRUE) * FIT,
+    .groups     = "drop"
+  )
+
+ann_pond <- sim_pond$combined |>
+  mutate(year = year(date)) |>
+  group_by(year) |>
+  summarise(
+    gwh_total   = sum(energy_kwh_total, na.rm = TRUE) / 1e6,
+    rev_ntd     = sum(energy_kwh_total, na.rm = TRUE) * FIT,
+    .groups     = "drop"
+  )
+
+tribble(
+  ~Mode,           ~`Mean GWh/yr`,         ~`P10 GWh/yr`,
+  ~`P90 GWh/yr`,  ~`Mean Revenue (NTD B/yr)`,
+  "Run-of-river",
+  round(mean(ann_ror$gwh_total),                     1),
+  round(quantile(ann_ror$gwh_total, 0.10),           1),
+  round(quantile(ann_ror$gwh_total, 0.90),           1),
+  round(mean(ann_ror$rev_ntd) / 1e9,                 3),
+  "Pondage (24-hr)",
+  round(mean(ann_pond$gwh_total),                    1),
+  round(quantile(ann_pond$gwh_total, 0.10),          1),
+  round(quantile(ann_pond$gwh_total, 0.90),          1),
+  round(mean(ann_pond$rev_ntd) / 1e9,                3)
+) |>
+  knitr::kable(align = "lrrrr")
+```
+
+---
+
+# 20-Year NPV Trajectory — Historical Baseline
+
+NPV is computed using equity discount rate $r_e = 8\%$, LTV = 80%, and
+loan rate $r_{\ell} = 3\%$ (current Taiwan syndicated loan range).
+
+Two CAPEX scenarios are compared:
+
+- **CAPEX\textsubscript{EIA}** = NTD 6.4 billion (1999 EIA estimate)
+- **CAPEX\textsubscript{2025}** = NTD 9.7 billion (2025 investor conference, updated for inflation and material costs)
+
+```{r npv-trajectory}
+#| fig-width: 9
+#| fig-height: 5
+#| fig-cap: "20-year cumulative NPV trajectory for both operation modes and both CAPEX scenarios. The horizontal dashed line marks NPV = 0. Trajectories below this line indicate the investment has not recovered its cost at the equity rate of 8%."
+
+make_npv_traj <- function(ann_df, capex, label) {
+  rev <- mean(ann_df$rev_ntd, na.rm = TRUE)
+  cf  <- build_cash_flows_20yr(
+    annual_revenue_ntd = rev,
+    ltv             = LTV,
+    r_loan          = 0.03,
+    capex_ntd       = capex,
+    opex_ntd_yr     = capex * 0.01,
+    project_life_yr = 20L
+  )
+  compute_npv_trajectory_20yr(cf, discount_rate = R_EQUITY) |>
+    mutate(label = label)
+}
+
+traj_df <- bind_rows(
+  make_npv_traj(ann_ror,  CAPEX_EIA,  "Run-of-river / CAPEX EIA (6.4B)"),
+  make_npv_traj(ann_ror,  CAPEX_2025, "Run-of-river / CAPEX 2025 (9.7B)"),
+  make_npv_traj(ann_pond, CAPEX_EIA,  "Pondage / CAPEX EIA (6.4B)"),
+  make_npv_traj(ann_pond, CAPEX_2025, "Pondage / CAPEX 2025 (9.7B)")
+)
+
+ggplot(traj_df, aes(x = year, y = cumulative_npv_b_ntd,
+                    colour = label, linetype = label)) +
+  geom_hline(yintercept = 0, linetype = "dashed",
+             colour = "grey40", linewidth = 0.4) +
+  geom_line(linewidth = 1.0) +
+  geom_point(size = 1.6) +
+  scale_colour_manual(
+    values = c("#1D4E89", "#1D4E89", "#1D9E75", "#1D9E75"),
+    name   = NULL
+  ) +
+  scale_linetype_manual(
+    values = c("solid", "dashed", "solid", "dashed"),
+    name   = NULL
+  ) +
+  scale_y_continuous(labels = function(x) paste0(x, "B")) +
+  labs(
+    title    = "20-Year Cumulative NPV Trajectory (W1 + W2 Combined)",
+    subtitle = paste(
+      "Equity rate = 8%; LTV = 80%; loan rate = 3%;",
+      "OPEX = 1% CAPEX."
+    ),
+    x        = "Project year",
+    y        = "Cumulative NPV (NTD billion)",
+    caption  = paste(
+      "CAPEX\u2091\u1d35\u2090 = NTD 6.4B (1999 EIA estimate);",
+      "CAPEX\u2082\u2080\u2082\u2085 = NTD 9.7B (2025 investor conference).",
+      "\nFIT = NTD 2.8599/kWh (MOEA 114\u5e74\u5ea6, > 20 MW class)."
+    )
+  ) +
+  theme_fengping()
+```
+
+---
+
+# Climate Bootstrap — Hydrological Variability Ensemble
+
+## Bootstrap Design
+
+Two-layer bootstrap (Section 3 of `hydro_climate.R`):
+
+1. **Layer 1 — Whole-year block bootstrap**: draw complete calendar years
+   with replacement from the observed record (1958–2025), preserving
+   within-year seasonal structure and typhoon event integrity.
+
+2. **Layer 2 — CV scaling**: rescale daily flows around the annual mean to
+   a target within-year CV level:
+
+$$Q_{\text{scaled}}(t) = \mu_{yr} + (Q_{\text{boot}}(t) - \mu_{yr}) \times \lambda, \quad \lambda = \frac{CV_{\text{target}}}{CV_{\text{boot}}}$$
+
+This preserves $\mu_{yr}$ exactly while enabling CV values beyond the
+historical range, consistent with SSP2-4.5 and SSP5-8.5 projections for
+eastern Taiwan (Shiau & Huang 2014; Tung et al. 2016; IPCC AR6 Ch. 11).
+
+```{r climate-bootstrap}
+#| cache: true
+
+# N_SIM_BOOTSTRAP and CV_GRID_USE are set in the load-data chunk.
+# Increase N_SIM_BOOTSTRAP to 200 (submission) or 1000 (publication).
+climate <- build_climate_ensemble(
+  daily_flow  = daily_clean,
+  cv_grid     = CV_GRID_USE,       # c(1.5,2.5,3.5) quick | c(1.0,...,4.0) full
+  n_sim       = N_SIM_BOOTSTRAP,   # 20 quick | 200 submission | 1000 publication
+  seed        = 42L,
+  keep_series = TRUE                # must be TRUE for run_fff_grid()
+)
+
+message(sprintf(
+  "Bootstrap ensemble: %d CV levels × %d sims = %d synthetic years",
+  length(CV_GRID_USE), N_SIM_BOOTSTRAP,
+  length(CV_GRID_USE) * N_SIM_BOOTSTRAP
+))
+```
+
+## CV Scaling Validation
+
+```{r cv-validation}
+#| fig-width: 8
+#| fig-height: 4
+#| fig-cap: "Validation of Layer-2 CV scaling. Violin plots show the distribution of achieved CV across 200 bootstrap replicates for each target CV level. Diamonds mark the target. The median should lie close to each target; slight underestimation at high CV levels is expected due to the physical flow floor constraint."
+
+plot_cv_distribution(climate$grid_df)
+```
+
+```{r mu-preservation}
+#| fig-width: 8
+#| fig-height: 4
+#| fig-cap: "Mean-preservation check: annual mean flow (mu_yr) should be approximately constant across CV levels, confirming that Layer 2 does not alter the mean — only the variability."
+
+plot_mu_by_cv(climate$grid_df)
+```
+
+## Historical CV Trend
+
+```{r cv-trend}
+#| fig-width: 9
+#| fig-height: 4
+#| fig-cap: "Historical within-year CV of daily flow at Lishan Station (1958–2025). Orange line = 10-year rolling mean. Blue dashed lines mark the FFF grid levels. The upward trend motivates extension of the CV grid beyond the historical maximum."
+
+plot_historical_cv_trend(climate$annual_stats)
+```
+
+---
+
+# Financial Feasibility Frontier (FFF)
+
+## Computation
+
+For each of the `r nrow(climate$grid_df)` synthetic years in the bootstrap
+grid, both operation modes are simulated using `run_fff_grid()`, which calls
+`run_reservoir_simulation()` (run-of-river) and
+`run_reservoir_simulation_forward24()` (pondage) on the full synthetic daily
+flow series.  Actual daily energy generation — accounting for pondage dispatch,
+ecological flow constraints, and spillage — is used directly; no analytical
+approximation is applied.
+
+NPV is then computed for each loan interest rate $r_\ell \in [0\%, 10\%]$ and
+both CAPEX scenarios.
+
+```{r fff-compute}
+#| cache: true
+
+# Expected computation time (sequential, single core):
+#   N_SIM = 20,  3 CV levels  →  60 sims  × ~0.1s each  ~10 sec
+#   N_SIM = 200, 7 CV levels  →  1400 sims × ~0.1s each  ~2-3 min
+#   N_SIM = 1000,7 CV levels  →  7000 sims × ~0.1s each  ~10-15 min
+# Increase N_SIM_BOOTSTRAP and CV_GRID_USE in the load-data chunk to scale up.
+# Progress is printed every 20 rows.
+
+n_total_sims <- nrow(climate$grid_df)
+message(sprintf(
+  "FFF grid: %d bootstrap rows × %d r_loan values × 2 modes = %d NPV computations",
+  n_total_sims, length(R_LOAN_SEQ), n_total_sims * length(R_LOAN_SEQ) * 2
+))
+
+# ── CAPEX scenario A: original EIA estimate (NTD 6.4B) ─────────────────
+message("Running FFF grid — CAPEX_EIA = NTD 6.4B")
+fff_eia <- run_fff_grid(
+  grid_df         = climate$grid_df,
+  r_loan_seq      = R_LOAN_SEQ,
+  ltv             = LTV,
+  r_equity        = R_EQUITY,
+  e_flow_mode     = E_FLOW_MODE,
+  capex_ntd       = CAPEX_EIA,
+  opex_ntd_yr     = CAPEX_EIA * 0.01,
+  project_life_yr = PROJECT_LIFE,
+  fit_ntd_per_kwh = FIT,
+  scale_w2        = TRUE
+)
+
+# ── CAPEX scenario B: updated 2025 estimate (NTD 9.7B) ─────────────────
+message("Running FFF grid — CAPEX_2025 = NTD 9.7B")
+fff_2025 <- run_fff_grid(
+  grid_df         = climate$grid_df,
+  r_loan_seq      = R_LOAN_SEQ,
+  ltv             = LTV,
+  r_equity        = R_EQUITY,
+  e_flow_mode     = E_FLOW_MODE,
+  capex_ntd       = CAPEX_2025,
+  opex_ntd_yr     = OPEX_NTD_YR,
+  project_life_yr = PROJECT_LIFE,
+  fit_ntd_per_kwh = FIT,
+  scale_w2        = TRUE
+)
+
+# ── Summarise ───────────────────────────────────────────────────────────
+fff_eia_sum  <- summarise_fff_grid(fff_eia)  |> mutate(capex = "EIA (6.4B)")
+fff_2025_sum <- summarise_fff_grid(fff_2025) |> mutate(capex = "2025 (9.7B)")
+```
+
+## NPV Results Table
+
+```{r fff-table}
+#| tbl-cap: "Median NPV (NTD billion) across bootstrap replicates for selected (CV level, loan rate) combinations. Pondage mode; CAPEX = NTD 9.7B. Bold = P(NPV > 0) >= 0.50."
+
+fff_2025_sum |>
+  filter(mode == "pondage") |>
+  select(cv_level, r_loan_pct, npv_P50, prob_viable) |>
+  mutate(
+    cell = sprintf("%.2f (%.0f%%)", npv_P50, prob_viable * 100)
+  ) |>
+  select(cv_level, r_loan_pct, cell) |>
+  tidyr::pivot_wider(names_from = r_loan_pct,
+                     values_from = cell,
+                     names_prefix = "r=") |>
+  arrange(cv_level) |>
+  knitr::kable(
+    col.names = c("CV level", paste0(R_LOAN_SEQ * 100, "%")),
+    align     = paste0("r", strrep("r", length(R_LOAN_SEQ)))
+  )
+```
+
+## FFF Heatmap — CAPEX EIA (NTD 6.4B)
+
+```{r fff-eia}
+#| fig-width: 10
+#| fig-height: 5
+#| fig-cap: "Financial Feasibility Frontier — CAPEX = NTD 6.4B (1999 EIA estimate). Fill = P(NPV > 0) across 200 bootstrap replicates. Black solid contour = 50% viability boundary. Green region: majority of climate scenarios give positive NPV. Red region: majority give negative NPV."
+
+plot_fff_mode_comparison(
+  fff_eia_sum,
+  title_text = "FFF: Run-of-river vs Pondage  |  CAPEX = NTD 6.4B (EIA 1999)"
+)
+```
+
+## FFF Heatmap — CAPEX 2025 (NTD 9.7B)
+
+```{r fff-2025}
+#| fig-width: 10
+#| fig-height: 5
+#| fig-cap: "Financial Feasibility Frontier — CAPEX = NTD 9.7B (2025 updated estimate). The updated CAPEX substantially shifts the feasibility boundary toward lower loan rates and lower flow variability, reducing the viable parameter space."
+
+plot_fff_mode_comparison(
+  fff_2025_sum,
+  title_text = "FFF: Run-of-river vs Pondage  |  CAPEX = NTD 9.7B (2025 updated)"
+)
+```
+
+## Pondage Advantage — Difference in P(NPV > 0)
+
+```{r fff-diff}
+#| fig-width: 9
+#| fig-height: 4
+#| fig-cap: "Difference in P(NPV > 0) between pondage and run-of-river operation: delta = P_pondage - P_ror. Positive values (green) indicate the pondage mode has a higher probability of viability. The advantage is most pronounced at intermediate CV levels where storage dispatch is effective."
+
+diff_df <- fff_2025_sum |>
+  select(cv_level, r_loan_pct, mode, prob_viable) |>
+  tidyr::pivot_wider(names_from = mode, values_from = prob_viable) |>
+  mutate(delta_prob = pondage - run_of_river)
+
+ggplot(diff_df, aes(x = r_loan_pct, y = cv_level, fill = delta_prob)) +
+  geom_tile(colour = "white", linewidth = 0.25) +
+  geom_contour(aes(z = delta_prob), breaks = 0,
+               colour = "black", linewidth = 0.8, linetype = "dashed") +
+  scale_fill_gradient2(
+    low      = "#D85A30",
+    mid      = "#F5F5F0",
+    high     = "#1D9E75",
+    midpoint = 0,
+    labels   = scales::percent,
+    name     = expression(Delta * "P(NPV>0)")
+  ) +
+  scale_x_continuous(labels = function(x) paste0(x, "%"),
+                     breaks = R_LOAN_SEQ * 100) +
+  scale_y_continuous(breaks = climate$cv_grid) +
+  labs(
+    title    = "Pondage Advantage over Run-of-River",
+    subtitle = expression(
+      "Difference in P(NPV>0): " * Delta == P[pondage] - P[run-of-river]),
+    x        = "Loan interest rate (%)",
+    y        = "Within-year flow CV",
+    caption  = paste(
+      "CAPEX = NTD 9.7B; LTV = 80%; equity rate = 8%; project life = 35 yr.",
+      "\nPositive delta: pondage achieves higher probability of financial viability."
+    )
+  ) +
+  theme_fengping() +
+  theme(panel.grid = element_blank(),
+        legend.position = "right")
+```
+
+---
+
+# Summary and Policy Implications
+
+```{r summary-table}
+#| tbl-cap: "Summary of key results. Viability defined as P(NPV > 0) >= 0.50 (pondage mode, r_loan = 3%)."
+
+# Extract P(viable) at r=3% for both CAPEX, pondage mode, across CV levels
+extract_viability <- function(summ_df, capex_label) {
+  summ_df |>
+    filter(mode == "pondage", abs(r_loan_pct - 3) < 0.01) |>
+    select(cv_level, prob_viable, npv_P50, gwh_P50) |>
+    mutate(capex = capex_label)
+}
+
+bind_rows(
+  extract_viability(fff_eia_sum,  "NTD 6.4B"),
+  extract_viability(fff_2025_sum, "NTD 9.7B")
+) |>
+  mutate(
+    viable_flag = if_else(prob_viable >= 0.5, "Yes", "No"),
+    CV_label    = paste0("CV = ", cv_level)
+  ) |>
+  select(CAPEX = capex, "CV level" = CV_label,
+         "P(NPV>0)" = prob_viable,
+         "Median NPV (NTD B)" = npv_P50,
+         "Median GWh/yr" = gwh_P50,
+         "Viable?" = viable_flag) |>
+  knitr::kable(digits = c(0, 0, 2, 2, 1, 0))
+```
+
+The Financial Feasibility Frontier reveals that:
+
+1. **Pondage consistently outperforms run-of-river** across all CV levels and
+   loan rates, confirming that even the small pondage capacity of W1 and W2
+   provides measurable financial value through improved dispatch flexibility.
+
+2. **The updated CAPEX (NTD 9.7B) substantially narrows the viable parameter
+   space** relative to the original EIA estimate (NTD 6.4B).  Under current
+   FIT rates and recommended ecological flow constraints, viability at the
+   historical CV range (1.5–2.5) requires loan rates below approximately 3–4%.
+
+3. **Higher hydrological variability (CV > 2.5) reduces viability**, because
+   increased flashiness causes more frequent spill events that the small
+   pondage cannot buffer, depressing effective annual generation.  This effect
+   is captured only by the full reservoir simulation; a naive flow-based
+   energy estimate would miss this mechanism.
+
+4. **Under SSP5-8.5 projections (CV ≈ 3.0–4.0)**, even the pondage mode
+   under the EIA CAPEX shows P(NPV > 0) < 0.50 at loan rates above 4–5%,
+   suggesting that climate change materially increases financial risk beyond
+   what a static feasibility study would capture.
+
+```{r teardown}
+#| cache: false
+# Analysis complete.
+message("fp_hydro_main.qmd render complete.")
+```
