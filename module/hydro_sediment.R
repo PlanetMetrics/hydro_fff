@@ -462,9 +462,17 @@ build_sediment_outputs <- function(sed_csv_path,
   curve      <- fit_rating_curve(sed_clean, plot_fit = plot_fit)
   daily_ssl  <- estimate_daily_ssl(daily_flow, curve)
   
-  annual_ssl <- sum(daily_ssl$SSL_mt_day, na.rm = TRUE)
+  annual_ssl <- daily_ssl |>
+    mutate(yr = format(date, "%Y")) |>
+    group_by(yr) |>
+    summarise(ssl_yr = sum(SSL_mt_day, na.rm = TRUE), .groups = "drop") |>
+    pull(ssl_yr) |>
+    mean()
+
   message(sprintf(
-    "Annual SSL estimate (full daily record): %.0f MT/year", annual_ssl
+    "Mean annual SSL (averaged over %d calendar years): %.0f MT/year",
+    nrow(daily_ssl |> mutate(yr = format(date, "%Y")) |> distinct(yr)),
+    annual_ssl
   ))
   
   list(

@@ -454,8 +454,8 @@ plot_npv_feasibility_frontier <- function(sensitivity_df) {
                  colour = "white", linewidth = 1.2,
                  linetype = "dashed") +
     scale_fill_gradient2(
-      low      = "#D85A30",
-      mid      = "white",
+      low      = "#8B1A4A",
+      mid      = "#F5F0F4",
       high     = "#1D9E75",
       midpoint = 0,
       name     = "NPV\n(NTD billion)",
@@ -876,10 +876,13 @@ plot_fff_heatmap <- function(npv_summary_df,
       linetype  = "solid"
     ) +
 
-    # Colour scale: red (infeasible) → white (breakeven) → green (feasible)
+    # Colour scale: purple-red (infeasible) → neutral → green (feasible)
+    # Low = #8B1A4A  deep magenta-red (清楚的紫紅, distinct from green)
+    # Mid = #F5F0F4  near-white with faint lavender (avoids ambiguous yellow)
+    # High = #1D9E75 teal-green (賺錢)
     scale_fill_gradient2(
-      low      = "#D85A30",
-      mid      = "#F5F5F0",
+      low      = "#8B1A4A",
+      mid      = "#F5F0F4",
       high     = "#1D9E75",
       midpoint = 0.50,
       limits   = c(0, 1),
@@ -972,8 +975,8 @@ plot_fff_npv_median <- function(npv_summary_df,
     ) +
 
     scale_fill_gradient2(
-      low      = "#D85A30",
-      mid      = "#F5F5F0",
+      low      = "#8B1A4A",
+      mid      = "#F5F0F4",
       high     = "#1D9E75",
       midpoint = midpt,
       labels   = function(x) sprintf("%.1f", x),

@@ -62,12 +62,20 @@ library(here)
 # Update when official cost estimates or FIT rates change.
 # -----------------------------------------------------------------------------
 
+# CAPEX breakdown (updated — see QMD setup chunk for the authoritative values)
+#   capex_civil_ntd : civil / structural construction (土木工程)
+#   capex_tx_ntd    : grid connection + electrical / mechanical equipment (輸配電)
+#   capex_ntd       : total = civil + tx
+#   opex_rate       : annual O&M as fraction of CAPEX (caller multiplies)
 .FIN <- list(
   fit_ntd_per_kwh  = 2.8599,      # FIT rate NTD/kWh (114年度, > 20 MW class)
-  capex_ntd        = 9.7e9,       # Total CAPEX NTD (法說會 2025)
-  opex_ntd_yr      = 9.7e7,       # Annual O&M = 1% of CAPEX
+  capex_civil_ntd  = 2.0e9,       # Civil/structural construction (NTD)
+  capex_tx_ntd     = 0.5e9,       # Tx + electrical/mechanical (NTD)
+  capex_ntd        = 2.5e9,       # Total CAPEX = civil + Tx (NTD)
+  opex_rate        = 0.01,        # Annual O&M as fraction of total CAPEX (1%)
+  opex_ntd_yr      = 2.5e7,       # Annual O&M = opex_rate × capex_ntd (NTD/yr)
   project_life_yr  = 35L,         # Economic lifetime (years)
-  ltv_default      = 0.75,        # Default loan-to-value ratio
+  ltv_default      = 0.80,        # Default loan-to-value ratio (80% debt)
   r_loan_default   = 0.03,        # Default loan interest rate
   r_equity         = 0.08,        # Required equity return
   kwh_per_gwh      = 1e6          # Unit conversion

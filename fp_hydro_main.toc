@@ -1,0 +1,24 @@
+\contentsline {section}{\numberline {1}Sediment and Rating Curve}{2}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Suspended Sediment Rating Curve}{2}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Reservoir Sedimentation --- W1 and W2}{2}{subsection.1.2}%
+\contentsline {section}{\numberline {2}Reservoir Simulation --- Historical Baseline}{4}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Operation Window --- Interactive Date Selection}{4}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Annual Energy --- Calendar Heatmap}{5}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Annual Generation Summary --- Run-of-River vs Pondage}{5}{subsection.2.3}%
+\contentsline {section}{\numberline {3}35-Year NPV Trajectory --- Historical Baseline}{6}{section.3}%
+\contentsline {section}{\numberline {4}Climate Bootstrap --- Hydrological Variability Ensemble}{6}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Bootstrap Design}{6}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}CV Scaling Validation}{7}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Historical CV Trend}{8}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Bootstrap CV Distribution --- Option A (target CV on X-axis)}{9}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Bootstrap CV Distribution --- Option B (all simulations coloured by level)}{10}{subsection.4.5}%
+\contentsline {subsection}{\numberline {4.6}Combined: Historical + Bootstrap Option A}{10}{subsection.4.6}%
+\contentsline {subsection}{\numberline {4.7}Combined: Historical + Bootstrap Option B}{11}{subsection.4.7}%
+\contentsline {section}{\numberline {5}Financial Feasibility Frontier (FFF)}{11}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Computation}{11}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}NPV Results Table}{11}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}FFF Heatmap --- CAPEX Baseline (NTD 2.5B)}{12}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}FFF Heatmap --- CAPEX Upper Bound (NTD 9.7B)}{13}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}Pondage Advantage --- Difference in P(NPV \textgreater {} 0)}{13}{subsection.5.5}%
+\contentsline {section}{\numberline {6}Summary and Policy Implications}{14}{section.6}%
+\providecommand \tocbasic@end@toc@file {}\tocbasic@end@toc@file 

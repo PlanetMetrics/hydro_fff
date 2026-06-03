@@ -84,14 +84,23 @@ weir_design  <- read_csv(here("data", "weir_design_flow.csv"),
 #   R_EQUITY : required equity return rate
 #   PROJECT_LIFE : economic lifetime from EIA design documents (35 years)
 
-CAPEX_OG     <- 5.0e9     # NTD — earliest public project announcement
-CAPEX_EIA    <- 6.4e9     # NTD — 1999 EIA feasibility report
-CAPEX_2025   <- 9.7e9     # NTD — 2025 investor conference (updated)
+# ── CAPEX breakdown ─────────────────────────────────────────────────────────
+#   CAPEX_CIVIL : civil / structural construction (土木工程)  20億 NTD
+#   CAPEX_TX    : grid connection + electrical / mechanical   5億  NTD
+#   CAPEX_TOTAL : total project CAPEX = CIVIL + TX           25億 NTD
+#
+# Note: 9.7B (法說會 2025) vs 2.5B (engineering-only decomposition) is a
+# key sensitivity.  The decomposed estimate is used here; the 2025 figure
+# is retained as an upper-bound scenario for the FFF sensitivity plot.
+CAPEX_CIVIL  <- 2.0e9     # NTD — civil/structural construction (土木工程)
+CAPEX_TX     <- 0.5e9     # NTD — grid connection + E&M equipment (輸配電)
+CAPEX_TOTAL  <- CAPEX_CIVIL + CAPEX_TX          # NTD 2.5B baseline
+CAPEX_HIGH   <- 9.7e9     # NTD — 2025 investor conference upper bound (法說會)
 
 FIT          <- 2.8599    # NTD/kWh — government FIT (MOEA 114年度, > 20 MW)
 PPA          <- 6.0       # NTD/kWh — corporate PPA rate; change to 8 or 10 to test
 
-OPEX_RATE    <- 0.01      # O&M as fraction of CAPEX (1% rule of thumb)
+OPEX_RATE    <- 0.01      # Annual O&M as fraction of CAPEX (1%/yr; mountain hydro typical 1-2%)
 
 LTV          <- 0.80      # 80% debt financing
 R_EQUITY     <- 0.08      # equity discount rate
@@ -363,7 +372,7 @@ loan rate $r_{\ell} = 3\%$.  Electricity revenue uses the PPA rate
 ```{r npv-trajectory}
 #| fig-width: 9
 #| fig-height: 5
-#| fig-cap: "35-year cumulative NPV trajectory for both operation modes and three CAPEX scenarios. Revenue at PPA rate (NTD 6.0/kWh). Dashed horizontal line = NPV breakeven."
+#| fig-cap: "35-year cumulative NPV trajectory for both operation modes and two CAPEX scenarios. Baseline: 25億 NTD (20億 civil + 5億 Tx/E&M); Upper bound: 97億 NTD (2025 investor conference). Revenue at PPA rate (NTD 6.0/kWh). Dashed horizontal line = NPV breakeven."
 
 make_npv_traj <- function(ann_df, capex, label) {
   rev <- mean(ann_df$rev_ntd, na.rm = TRUE)
@@ -390,19 +399,16 @@ make_npv_traj <- function(ann_df, capex, label) {
 }
 
 traj_df <- bind_rows(
-  make_npv_traj(ann_ror,  CAPEX_OG,   "Run-of-river / CAPEX OG (5.0B)"),
-  make_npv_traj(ann_ror,  CAPEX_EIA,  "Run-of-river / CAPEX EIA (6.4B)"),
-  make_npv_traj(ann_ror,  CAPEX_2025, "Run-of-river / CAPEX 2025 (9.7B)"),
-  make_npv_traj(ann_pond, CAPEX_OG,   "Pondage / CAPEX OG (5.0B)"),
-  make_npv_traj(ann_pond, CAPEX_EIA,  "Pondage / CAPEX EIA (6.4B)"),
-  make_npv_traj(ann_pond, CAPEX_2025, "Pondage / CAPEX 2025 (9.7B)")
+  make_npv_traj(ann_ror,  CAPEX_TOTAL, "Run-of-river / CAPEX 2.5B"),
+  make_npv_traj(ann_ror,  CAPEX_HIGH,  "Run-of-river / CAPEX 9.7B (upper)"),
+  make_npv_traj(ann_pond, CAPEX_TOTAL, "Pondage / CAPEX 2.5B"),
+  make_npv_traj(ann_pond, CAPEX_HIGH,  "Pondage / CAPEX 9.7B (upper)")
 ) |>
   mutate(
     mode_label  = if_else(grepl("Pondage", label), "Pondage", "Run-of-river"),
     capex_label = case_when(
-      grepl("OG",   label) ~ "CAPEX OG (5.0B)",
-      grepl("EIA",  label) ~ "CAPEX EIA (6.4B)",
-      TRUE                 ~ "CAPEX 2025 (9.7B)"
+      grepl("2.5B", label) ~ "CAPEX 2.5B (baseline)",
+      TRUE                 ~ "CAPEX 9.7B (upper bound)"
     )
   )
 
@@ -412,9 +418,8 @@ ggplot(traj_df, aes(x = year, y = cumulative_npv_b_ntd,
              colour = "grey40", linewidth = 0.4) +
   geom_line(linewidth = 0.9) +
   scale_colour_manual(
-    values = c("CAPEX OG (5.0B)"   = "#1D9E75",
-               "CAPEX EIA (6.4B)"  = "#1D4E89",
-               "CAPEX 2025 (9.7B)" = "#D85A30"),
+    values = c("CAPEX 2.5B (baseline)"  = "#1D9E75",
+               "CAPEX 9.7B (upper bound)" = "#8B1A4A"),
     name = "CAPEX scenario"
   ) +
   scale_linetype_manual(
@@ -606,27 +611,23 @@ run_fff <- function(capex, label) {
   )
 }
 
-message("FFF — CAPEX OG (5.0B)")
-fff_og   <- run_fff(CAPEX_OG,   "CAPEX OG (5.0B)")
+message("FFF — CAPEX baseline (2.5B)")
+fff_base <- run_fff(CAPEX_TOTAL, "CAPEX 2.5B (baseline)")
 
-message("FFF — CAPEX EIA (6.4B)")
-fff_eia  <- run_fff(CAPEX_EIA,  "CAPEX EIA (6.4B)")
-
-message("FFF — CAPEX 2025 (9.7B)")
-fff_2025 <- run_fff(CAPEX_2025, "CAPEX 2025 (9.7B)")
+message("FFF — CAPEX upper bound (9.7B)")
+fff_high <- run_fff(CAPEX_HIGH,  "CAPEX 9.7B (upper)")
 
 # Summarise each scenario
-fff_og_sum   <- summarise_fff_grid(fff_og)   |> mutate(capex = "OG (5.0B)")
-fff_eia_sum  <- summarise_fff_grid(fff_eia)  |> mutate(capex = "EIA (6.4B)")
-fff_2025_sum <- summarise_fff_grid(fff_2025) |> mutate(capex = "2025 (9.7B)")
+fff_base_sum <- summarise_fff_grid(fff_base) |> mutate(capex = "2.5B (baseline)")
+fff_high_sum <- summarise_fff_grid(fff_high) |> mutate(capex = "9.7B (upper)")
 ```
 
 ## NPV Results Table
 
 ```{r fff-table}
-#| tbl-cap: "Median NPV (NTD billion) and P(NPV > 0) across bootstrap replicates. Pondage mode; CAPEX = NTD 9.7B; PPA = NTD 6.0/kWh. Format: NPV (viability %)."
+#| tbl-cap: "Median NPV (NTD billion) and P(NPV > 0) across bootstrap replicates. Pondage mode; CAPEX = NTD 2.5B (baseline); PPA = NTD 6.0/kWh. Format: NPV (viability %)."
 
-fff_2025_sum |>
+fff_base_sum |>
   filter(mode == "Pondage") |>
   mutate(
     r_label = paste0(sprintf("%.0f", r_loan_pct), "%"),
@@ -642,42 +643,29 @@ fff_2025_sum |>
   knitr::kable(align = paste0("r", strrep("r", length(R_LOAN_SEQ))))
 ```
 
-## FFF Heatmap — CAPEX OG (NTD 5.0B)
+## FFF Heatmap — CAPEX Baseline (NTD 2.5B)
 
-```{r fff-og}
+```{r fff-base}
 #| fig-width: 10
 #| fig-height: 5
-#| fig-cap: "FFF — CAPEX = NTD 5.0B (earliest public announcement). PPA = NTD 6.0/kWh."
+#| fig-cap: "FFF — CAPEX = NTD 2.5B (engineering decomposition: 20億 civil + 5億 Tx/E&M). Green = P(NPV > 0) majority viable; purple-red = majority loss. PPA = NTD 6.0/kWh."
 
 plot_fff_mode_comparison(
-  fff_og_sum,
-  title_text = "FFF: Run-of-river vs Pondage  |  CAPEX = NTD 5.0B (OG announcement)"
+  fff_base_sum,
+  title_text = "FFF: Run-of-river vs Pondage  |  CAPEX = NTD 2.5B (20億 civil + 5億 Tx)"
 )
 ```
 
-## FFF Heatmap — CAPEX EIA (NTD 6.4B)
+## FFF Heatmap — CAPEX Upper Bound (NTD 9.7B)
 
-```{r fff-eia}
+```{r fff-high}
 #| fig-width: 10
 #| fig-height: 5
-#| fig-cap: "FFF — CAPEX = NTD 6.4B (1999 EIA feasibility report). PPA = NTD 6.0/kWh."
+#| fig-cap: "FFF — CAPEX = NTD 9.7B (2025 investor conference upper bound). At this cost level the feasibility boundary shifts dramatically; pondage retains a narrow viable region at low loan rates under baseline CV. PPA = NTD 6.0/kWh."
 
 plot_fff_mode_comparison(
-  fff_eia_sum,
-  title_text = "FFF: Run-of-river vs Pondage  |  CAPEX = NTD 6.4B (EIA 1999)"
-)
-```
-
-## FFF Heatmap — CAPEX 2025 (NTD 9.7B)
-
-```{r fff-2025}
-#| fig-width: 10
-#| fig-height: 5
-#| fig-cap: "FFF — CAPEX = NTD 9.7B (2025 updated estimate). The updated CAPEX substantially shifts the feasibility boundary, reducing the viable parameter space. PPA = NTD 6.0/kWh."
-
-plot_fff_mode_comparison(
-  fff_2025_sum,
-  title_text = "FFF: Run-of-river vs Pondage  |  CAPEX = NTD 9.7B (2025 updated)"
+  fff_high_sum,
+  title_text = "FFF: Run-of-river vs Pondage  |  CAPEX = NTD 9.7B (upper bound)"
 )
 ```
 
@@ -691,7 +679,7 @@ plot_fff_mode_comparison(
 # Note: after recode() in fff-compute, mode values are "Pondage" and
 # "Run-of-river" (title-case with hyphen).  pivot_wider creates columns
 # with those exact names, so backtick-quote them in mutate().
-diff_df <- fff_2025_sum |>
+diff_df <- fff_base_sum |>
   select(cv_level, r_loan_pct, mode, prob_viable) |>
   tidyr::pivot_wider(names_from = mode, values_from = prob_viable) |>
   mutate(delta_prob = Pondage - `Run-of-river`)
@@ -701,8 +689,8 @@ ggplot(diff_df, aes(x = r_loan_pct, y = cv_level, fill = delta_prob)) +
   geom_contour(aes(z = delta_prob), breaks = 0,
                colour = "black", linewidth = 0.8, linetype = "dashed") +
   scale_fill_gradient2(
-    low      = "#D85A30",
-    mid      = "#F5F5F0",
+    low      = "#8B1A4A",
+    mid      = "#F5F0F4",
     high     = "#1D9E75",
     midpoint = 0,
     labels   = scales::percent,
@@ -718,9 +706,9 @@ ggplot(diff_df, aes(x = r_loan_pct, y = cv_level, fill = delta_prob)) +
     x        = "Loan interest rate (%)",
     y        = "Within-year flow CV",
     caption  = paste0(
-      "CAPEX = NTD 9.7B; LTV = ", LTV * 100, "%; equity rate = ",
+      "CAPEX = NTD 2.5B (baseline); LTV = ", LTV * 100, "%; equity rate = ",
       R_EQUITY * 100, "%; project life = ", PROJECT_LIFE, " yr.",
-      "\nPositive delta: pondage achieves higher probability of financial viability."
+      "\nPositive delta (green): pondage achieves higher P(NPV>0) than run-of-river."
     )
   ) +
   theme_fengping() +
@@ -732,7 +720,7 @@ ggplot(diff_df, aes(x = r_loan_pct, y = cv_level, fill = delta_prob)) +
 # Summary and Policy Implications
 
 ```{r summary-table}
-#| tbl-cap: "Summary of key results. Viability defined as P(NPV > 0) >= 0.50 (Pondage mode, r_loan = 3%). Revenue at PPA rate (NTD 6.0/kWh)."
+#| tbl-cap: "Summary of key results by CAPEX scenario. Viability defined as P(NPV > 0) >= 0.50 (Pondage mode, r_loan = 3%). Revenue at PPA rate (NTD 6.0/kWh)."
 
 extract_viability <- function(summ_df, capex_label) {
   summ_df |>
@@ -742,9 +730,8 @@ extract_viability <- function(summ_df, capex_label) {
 }
 
 bind_rows(
-  extract_viability(fff_og_sum,   "NTD 5.0B (OG)"),
-  extract_viability(fff_eia_sum,  "NTD 6.4B (EIA)"),
-  extract_viability(fff_2025_sum, "NTD 9.7B (2025)")
+  extract_viability(fff_base_sum, "NTD 2.5B (baseline: 20億 civil + 5億 Tx)"),
+  extract_viability(fff_high_sum, "NTD 9.7B (upper bound, 法說會 2025)")
 ) |>
   mutate(
     viable_flag = if_else(prob_viable >= 0.5, "Yes", "No"),
@@ -767,10 +754,11 @@ The Financial Feasibility Frontier reveals that:
    loan rates, confirming that even the small pondage capacity of W1 and W2
    provides measurable financial value through improved dispatch flexibility.
 
-2. **The updated CAPEX (NTD 9.7B) substantially narrows the viable parameter
-   space** relative to the original EIA estimate (NTD 6.4B).  Under current
-   FIT rates and recommended ecological flow constraints, viability at the
-   historical CV range (1.5–2.5) requires loan rates below approximately 3–4%.
+2. **CAPEX is the dominant risk factor.** Under the engineering-decomposed
+   baseline (NTD 2.5B: 20億 civil + 5億 Tx/E&M), both operation modes are
+   financially viable across the full historical CV range (1.5–2.5) at loan
+   rates up to 8–9%.  Under the 2025 investor conference upper bound
+   (NTD 9.7B), viability is confined to low loan rates (≤ 3%) and baseline CV.
 
 3. **Higher hydrological variability (CV > 2.5) reduces viability**, because
    increased flashiness causes more frequent spill events that the small
@@ -778,10 +766,10 @@ The Financial Feasibility Frontier reveals that:
    is captured only by the full reservoir simulation; a naive flow-based
    energy estimate would miss this mechanism.
 
-4. **Under SSP5-8.5 projections (CV ≈ 3.0–4.0)**, even the pondage mode
-   under the EIA CAPEX shows P(NPV > 0) < 0.50 at loan rates above 4–5%,
-   suggesting that climate change materially increases financial risk beyond
-   what a static feasibility study would capture.
+4. **Under SSP5-8.5 projections (CV ≈ 3.0–4.0)**, even under the baseline
+   CAPEX, pondage viability requires loan rates below 5–6%, suggesting that
+   climate change imposes a meaningful financing-cost premium on flash-flood
+   dominated catchments.
 
 ```{r teardown}
 #| cache: false
