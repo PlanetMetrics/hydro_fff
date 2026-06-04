@@ -19,6 +19,28 @@ execute:
   cache: true
 ---
 
+# OVERVIEW
+
+This program evaluates the financial feasibility of the proposed Fengping River hydropower project under historic flows and two climate change scenarios (SSP2-4.5 and SSP5-8.5).
+
+**Program contract**
+
+-   **Inputs:** daily streamflow record (1958–2025), sediment rating-curve data, weir design specifications, climate projection parameters, finance parameters (FIT, CAPEX, LTV, loan rate, equity rate, project lifetime).
+-   **Outputs:** annual energy generation (GWh), annual revenue (NTD), 20-year NPV, and an NPV feasibility frontier across the loan-rate × LTV parameter grid, reported for each scenario (baseline, SSP2-4.5, SSP5-8.5).
+-   **Parameters:** e-flow mode, sediment toggle, number of bootstrap simulations, projection year, finance parameter ranges.
+
+# MODULES
+
+| Module | Purpose | Reuse |
+|------------------------|---------------------------|---------------------|
+| `hydro_reservoir.R` | Reservoir simulation: flow to energy | Used 3 times (baseline, SSP2-4.5, SSP5-8.5) |
+| `hydro_sediment.R` | Sediment load to trap efficiency to storage loss | 1 time |
+| `hydro_climate.R` | Bootstrap climate scenarios from historic flow | Used 2 times (SSP2-4.5, SSP5-8.5) |
+| `hydro_finance.R` | Energy to revenue to NPV to feasibility frontier | Used 3 times (one per scenario) |
+| `hydro_plot.R` | Standardized plots for each output | many |
+| `hydro_test.R` | Unit tests for all modules | 1 time at setup |
+
+
 ```{r setup}
 #| cache: false
 
