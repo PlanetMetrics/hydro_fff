@@ -596,7 +596,8 @@ summarise_fff_grid <- function(fff_df) {
     group_by(cv_level, r_loan, r_loan_pct, mode) |>
     summarise(
       n_sim       = n(),
-      prob_viable = mean(viable,     na.rm = TRUE),
+      prob_viable = mean(viable,        na.rm = TRUE),
+      npv_mean    = mean(npv_b_ntd,     na.rm = TRUE),   # E[NPV] — decision criterion
       npv_P10     = quantile(npv_b_ntd, 0.10, na.rm = TRUE),
       npv_P50     = quantile(npv_b_ntd, 0.50, na.rm = TRUE),
       npv_P90     = quantile(npv_b_ntd, 0.90, na.rm = TRUE),

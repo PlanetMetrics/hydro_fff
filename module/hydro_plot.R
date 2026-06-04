@@ -823,6 +823,82 @@ plot_energy_calendar_heatmap <- function(sim_weir,
 # =============================================================================
 
 # -----------------------------------------------------------------------------
+# .fff_annotations()
+#
+# Internal helper: returns a list of ggplot layers added to every FFF heatmap
+# to provide consistent contextual annotations across all figures.
+#
+# Annotations added:
+#   (1) Dashed horizontal line at cv_hist_boundary separating historical
+#       CV range from climate-change projections.
+#   (2) Dotted vertical line at ref_loan_pct (reference loan rate).
+#   (3) Text labels for climate scenario zones and reference rate.
+#
+# Arguments
+#   cv_hist_boundary  numeric   CV value separating historical / projected
+#                               Default 2.5 (upper end of historical range)
+#   ref_loan_pct      numeric   Reference loan rate (%) to mark. Default 3.
+#   x_label_pos       numeric   X position for zone text labels. Default 0.2.
+#   cv_max            numeric   Top of Y-axis (for positioning text). Default 4.
+# -----------------------------------------------------------------------------
+
+.fff_annotations <- function(cv_hist_boundary = 2.5,
+                              ref_loan_pct     = 3,
+                              x_label_pos      = 0.3,
+                              cv_max           = 4.0) {
+  list(
+    # ── Horizontal boundary: historical vs projected CV ──────────────────────
+    geom_hline(
+      yintercept = cv_hist_boundary,
+      linetype   = "dashed",
+      colour     = "grey45",
+      linewidth  = 0.55
+    ),
+
+    # ── Vertical reference line: typical loan rate ───────────────────────────
+    geom_vline(
+      xintercept = ref_loan_pct,
+      linetype   = "dotted",
+      colour     = "grey35",
+      linewidth  = 0.55
+    ),
+
+    # ── Zone labels (left margin) ─────────────────────────────────────────────
+    annotate(
+      "text",
+      x      = x_label_pos,
+      y      = cv_hist_boundary + (cv_max - cv_hist_boundary) * 0.45,
+      label  = "Projected CV\n(SSP2-4.5 / SSP5-8.5)",
+      hjust  = 0, vjust = 0.5,
+      size   = 2.6,
+      colour = "grey35",
+      fontface = "italic"
+    ),
+    annotate(
+      "text",
+      x      = x_label_pos,
+      y      = cv_hist_boundary * 0.55,
+      label  = "Historical\nCV range",
+      hjust  = 0, vjust = 0.5,
+      size   = 2.6,
+      colour = "grey35",
+      fontface = "italic"
+    ),
+
+    # ── Reference loan rate label ─────────────────────────────────────────────
+    annotate(
+      "text",
+      x      = ref_loan_pct + 0.15,
+      y      = cv_max,
+      label  = paste0(ref_loan_pct, "% ref."),
+      hjust  = 0, vjust = 1.1,
+      size   = 2.5,
+      colour = "grey35"
+    )
+  )
+}
+
+# -----------------------------------------------------------------------------
 # plot_fff_heatmap()
 #
 # Heatmap of P(NPV > 0) across the (r_loan × cv_level) grid.
@@ -876,18 +952,17 @@ plot_fff_heatmap <- function(npv_summary_df,
       linetype  = "solid"
     ) +
 
-    # Colour scale: purple-red (infeasible) → neutral → green (feasible)
-    # Low = #8B1A4A  deep magenta-red (清楚的紫紅, distinct from green)
-    # Mid = #F5F0F4  near-white with faint lavender (avoids ambiguous yellow)
-    # High = #1D9E75 teal-green (賺錢)
-    scale_fill_gradient2(
-      low      = "#8B1A4A",
-      mid      = "#F5F0F4",
-      high     = "#1D9E75",
-      midpoint = 0.50,
-      limits   = c(0, 1),
-      labels   = scales::percent,
-      name     = expression("P(NPV" > "0)")
+    # P(NPV > 0) colour scale: cream → dark charcoal (sequential)
+    # Sequential rather than diverging because probability is always non-negative;
+    # higher is always better.  The 50% contour line marks the decision boundary.
+    # Cream  (#F5F0E0) = near-zero probability  → high risk
+    # Charcoal (#2D3142) = near-unity probability → high confidence
+    scale_fill_gradient(
+      low    = "#1A1A2E",
+      high   = "#F5F0E0",
+      limits = c(0, 1),
+      labels = scales::percent,
+      name   = "P(NPV > 0)"
     ) +
 
     scale_x_continuous(
@@ -899,25 +974,27 @@ plot_fff_heatmap <- function(npv_summary_df,
     ) +
 
     labs(
-      title    = title_text,
+      title    = paste0("P(NPV > 0) — ", title_text),
       subtitle = paste(
-        "Black contour = P(NPV > 0) = 50% (breakeven boundary).",
-        "Green = majority viable; red = majority loss.",
-        "\nY-axis: within-year CV of daily flow (proxy for climate variability).",
-        "Historical CV range: 1.5-2.5."
+        "Probability of positive NPV across bootstrap climate replicates.",
+        "Cream = high confidence of profit (P → 100%); dark/black = high risk of loss (P → 0%).",
+        "\nBlack contour = 50% break-even boundary (equal chance of profit or loss).",
+        "Dashed: CV = 2.5 (historical upper bound). Dotted: 3% reference loan rate."
       ),
-      x        = "Loan interest rate r_loan (%)",
-      y        = expression(
-        "Within-year flow CV = " * sigma[Q] / mu[Q] ~ "(dimensionless)"
-      ),
+      x        = "Loan interest rate (%)",
+      y        = expression("Within-year flow CV " * (sigma[Q] / mu[Q])),
       caption  = paste(
-        "FFF boundary defined as P(NPV > 0) = 0.50.",
+        "P(NPV > 0): fraction of bootstrap replicates with NPV > 0.",
         "Two-layer bootstrap: block resample (Layer 1) + CV scaling (Layer 2).",
-        "\nArnell (1998); Shiau & Huang (2014);",
-        "Tung et al. (2016); IPCC AR6 Ch.11 (2021).",
-        "\nCAPEX shown in title; PPA = NTD 6.0/kWh; LTV = 80%;",
-        "equity rate = 8%; project life = 35 yr."
+        "\nIPCC AR6 Ch.11 (2021); Shiau & Huang (2014); Tung et al. (2016).",
+        "PPA = NTD 6.0/kWh; LTV = 80%; equity rate = 8%; project life = 35 yr."
       )
+    ) +
+    .fff_annotations(
+      cv_hist_boundary = 2.5,
+      ref_loan_pct     = 3,
+      x_label_pos      = min(npv_summary_df$r_loan_pct) + 0.1,
+      cv_max           = max(npv_summary_df$cv_level)
     ) +
     theme_fengping() +
     theme(
@@ -1039,6 +1116,234 @@ plot_fff_npv_median <- function(npv_summary_df,
 #
 # Returns  ggplot object (faceted)
 # -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# plot_fff_npv_mean()
+#
+# Heatmap of E[NPV] (mean NPV across bootstrap replicates) in NTD billion.
+# Each cell is annotated with the numeric value so readers can read
+# exact amounts without consulting the colour bar.
+#
+# This is the primary financial-magnitude figure: it answers "how much money
+# does this project make or lose on average?"  The NPV = 0 contour is the
+# break-even boundary.
+#
+# Compare with plot_fff_heatmap() which shows P(NPV > 0) — the risk figure.
+# Both together give a complete picture: magnitude + probability.
+#
+# Arguments
+#   npv_summary_df   data.frame   output of summarise_fff_grid()
+#                                 must contain column npv_mean
+#   facet_col        character or NULL
+#   title_text       character
+#
+# Returns  ggplot object
+# -----------------------------------------------------------------------------
+
+plot_fff_npv_mean <- function(npv_summary_df,
+                              facet_col  = NULL,
+                              title_text = "Expected NPV (E[NPV]) across climate scenarios") {
+
+  stopifnot(
+    is.data.frame(npv_summary_df),
+    all(c("cv_level", "r_loan_pct", "npv_mean") %in% names(npv_summary_df))
+  )
+
+  # Symmetric colour limits so zero is centred
+  lim <- max(abs(npv_summary_df$npv_mean), na.rm = TRUE) * 1.05
+
+  p <- ggplot(npv_summary_df,
+              aes(x = r_loan_pct, y = cv_level, fill = npv_mean)) +
+    geom_tile(colour = "white", linewidth = 0.25) +
+
+    # Annotate each cell with rounded NTD B value
+    geom_text(
+      aes(label = sprintf("%+.1f", npv_mean)),
+      size   = 2.8,
+      colour = ifelse(abs(npv_summary_df$npv_mean) > lim * 0.55,
+                      "white", "grey20")
+    ) +
+
+    # NPV = 0 break-even contour
+    geom_contour(
+      aes(z = npv_mean),
+      breaks    = 0,
+      colour    = "black",
+      linewidth = 1.1,
+      linetype  = "solid"
+    ) +
+
+    scale_fill_gradient2(
+      low      = "#8B1A4A",
+      mid      = "#F5F0F4",
+      high     = "#1D9E75",
+      midpoint = 0,
+      limits   = c(-lim, lim),
+      labels   = function(x) sprintf("%+.1f B", x),
+      name     = "E[NPV]\n(NTD billion)"
+    ) +
+
+    scale_x_continuous(
+      labels = function(x) paste0(x, "%"),
+      breaks = scales::pretty_breaks(n = 6)
+    ) +
+    scale_y_continuous(
+      breaks = sort(unique(npv_summary_df$cv_level))
+    ) +
+
+    labs(
+      title    = paste0("E[NPV] — ", title_text),
+      subtitle = paste(
+        "Expected NPV across bootstrap climate replicates (NTD billion, cell-labelled).",
+        "Deep green = large expected profit; deep purple-red = large expected loss.",
+        "\nBlack contour = E[NPV] = 0 (break-even). Upper-left = profit zone; lower-right = loss zone.",
+        "Dashed: CV = 2.5 (historical upper bound). Dotted: 3% reference loan rate."
+      ),
+      x       = "Loan interest rate (%)",
+      y       = expression("Within-year flow CV " * (sigma[Q] / mu[Q])),
+      caption = paste(
+        "E[NPV] = mean NPV across bootstrap replicates — standard financial decision criterion (NPV maximisation).",
+        "\nTwo-layer bootstrap: block resample (Layer 1) + CV scaling (Layer 2).",
+        "PPA = NTD 6.0/kWh; LTV = 80%; equity rate = 8%; project life = 35 yr."
+      )
+    ) +
+    .fff_annotations(
+      cv_hist_boundary = 2.5,
+      ref_loan_pct     = 3,
+      x_label_pos      = min(npv_summary_df$r_loan_pct) + 0.1,
+      cv_max           = max(npv_summary_df$cv_level)
+    ) +
+    theme_fengping() +
+    theme(
+      legend.position   = "right",
+      panel.grid        = element_blank(),
+      legend.key.width  = unit(0.45, "cm"),
+      legend.key.height = unit(1.6, "cm")
+    )
+
+  if (!is.null(facet_col) && facet_col %in% names(npv_summary_df)) {
+    p <- p + facet_wrap(as.formula(paste("~", facet_col)), ncol = 2)
+  }
+
+  p
+}
+
+
+# -----------------------------------------------------------------------------
+# plot_fff_npv_mean_comparison()
+#
+# Side-by-side E[NPV] heatmaps for run-of-river and pondage — same interface
+# as plot_fff_mode_comparison() but using E[NPV] as the fill.
+# -----------------------------------------------------------------------------
+
+plot_fff_npv_mean_comparison <- function(
+    npv_summary_df,
+    title_text = "E[NPV]: Run-of-river vs Pondage") {
+
+  stopifnot(
+    is.data.frame(npv_summary_df),
+    "mode" %in% names(npv_summary_df)
+  )
+
+  npv_summary_df <- npv_summary_df |>
+    mutate(mode = factor(mode, levels = c("Run-of-river", "Pondage")))
+
+  plot_fff_npv_mean(npv_summary_df,
+                    facet_col  = "mode",
+                    title_text = title_text)
+}
+
+
+# -----------------------------------------------------------------------------
+# plot_fff_enpv_all_capex()
+#
+# Final summary figure: E[NPV] heatmaps for all four CAPEX estimates,
+# pondage mode only, arranged in a 2×2 grid.
+# This gives readers a single figure to compare cost scenarios.
+#
+# Arguments
+#   list of named summary dfs: list(C1 = fff_c1_sum, C2 = ..., ...)
+#   Each df must have column npv_mean.
+# -----------------------------------------------------------------------------
+
+plot_fff_enpv_all_capex <- function(capex_list,
+                                    title_text = "E[NPV] across four CAPEX estimates — Pondage mode") {
+
+  stopifnot(is.list(capex_list), length(capex_list) == 4)
+
+  combined <- purrr::imap_dfr(capex_list, function(df, label) {
+    df |>
+      filter(mode == "Pondage") |>
+      mutate(capex_label = factor(label, levels = names(capex_list)))
+  })
+
+  lim <- max(abs(combined$npv_mean), na.rm = TRUE) * 1.05
+
+  ggplot(combined,
+         aes(x = r_loan_pct, y = cv_level, fill = npv_mean)) +
+    geom_tile(colour = "white", linewidth = 0.25) +
+    geom_text(
+      aes(label = sprintf("%+.1f", npv_mean)),
+      size = 2.5,
+      colour = ifelse(abs(combined$npv_mean) > lim * 0.55, "white", "grey20")
+    ) +
+    geom_contour(
+      aes(z = npv_mean),
+      breaks    = 0,
+      colour    = "black",
+      linewidth = 0.9,
+      linetype  = "solid"
+    ) +
+    scale_fill_gradient2(
+      low      = "#8B1A4A",
+      mid      = "#F5F0F4",
+      high     = "#1D9E75",
+      midpoint = 0,
+      limits   = c(-lim, lim),
+      labels   = function(x) sprintf("%+.1f B", x),
+      name     = "E[NPV]\n(NTD billion)"
+    ) +
+    scale_x_continuous(
+      labels = function(x) paste0(x, "%"),
+      breaks = scales::pretty_breaks(n = 5)
+    ) +
+    scale_y_continuous(
+      breaks = sort(unique(combined$cv_level))
+    ) +
+    facet_wrap(~ capex_label, ncol = 2) +
+    .fff_annotations(
+      cv_hist_boundary = 2.5,
+      ref_loan_pct     = 3,
+      x_label_pos      = min(combined$r_loan_pct) + 0.1,
+      cv_max           = max(combined$cv_level)
+    ) +
+    labs(
+      title    = title_text,
+      subtitle = paste(
+        "Pondage mode. Cell value = E[NPV] (NTD B, mean across bootstrap replicates).",
+        "Deep green = large expected profit; deep purple-red = large expected loss.",
+        "\nBlack contour = break-even (E[NPV] = 0). Upper-left = profit zone; lower-right = loss zone.",
+        "Dashed: CV = 2.5 (historical upper bound). Dotted: 3% reference loan rate.",
+        "\nC1: NTD 2.5B (contract disclosure)  C2: NTD 5.0B (initial announcement)",
+        "C3: NTD 6.4B (EIA 1999)  C4: NTD 9.7B (investor conference 2025)"
+      ),
+      x       = "Loan interest rate (%)",
+      y       = expression("Within-year flow CV " * (sigma[Q] / mu[Q])),
+      caption = paste(
+        "E[NPV] = mean NPV across bootstrap replicates — standard financial decision criterion.",
+        "\nPPA = NTD 6.0/kWh; LTV = 80%; equity rate = 8%; project life = 35 yr."
+      )
+    ) +
+    theme_fengping() +
+    theme(
+      legend.position   = "right",
+      panel.grid        = element_blank(),
+      legend.key.width  = unit(0.45, "cm"),
+      legend.key.height = unit(1.8, "cm"),
+      strip.text        = element_text(size = 9, face = "bold")
+    )
+}
+
 
 plot_fff_mode_comparison <- function(
     npv_summary_df,

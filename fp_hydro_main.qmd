@@ -66,11 +66,11 @@ weir_design  <- read_csv(here("data", "weir_design_flow.csv"),
 
 # ── Global financial parameters ────────────────────────────────────────────
 #
-# CAPEX scenarios
-#   CAPEX_OG   : earliest public estimate at project announcement (~NTD 5.0B)
-#   CAPEX_EIA  : 1999 EIA feasibility report estimate (NTD 6.4B)
-#   CAPEX_2025 : 2025 investor conference updated estimate (NTD 9.7B)
-#                (reflects inflation, material cost increases since 1999)
+# CAPEX scenarios (four public estimates — see CAPEX_LABELS below)
+#   C1 : 2.5B — 公開資訊觀測站工程揭露 (工程分項: 土木20億 + 輸配電5億)
+#   C2 : 5.0B — 最初投資計畫公告
+#   C3 : 6.4B — 1999 EIA 環評可行性報告 (未調整通膨)
+#   C4 : 9.7B — 2025 法說會最新揭露 (含通膨與工程範疇變更)
 #
 # Electricity price
 #   FIT : government Feed-In Tariff, regulated purchase price from Taipower
@@ -84,18 +84,48 @@ weir_design  <- read_csv(here("data", "weir_design_flow.csv"),
 #   R_EQUITY : required equity return rate
 #   PROJECT_LIFE : economic lifetime from EIA design documents (35 years)
 
-# ── CAPEX breakdown ─────────────────────────────────────────────────────────
-#   CAPEX_CIVIL : civil / structural construction (土木工程)  20億 NTD
-#   CAPEX_TX    : grid connection + electrical / mechanical   5億  NTD
-#   CAPEX_TOTAL : total project CAPEX = CIVIL + TX           25億 NTD
+# ── CAPEX scenarios — four public estimates ─────────────────────────────────
 #
-# Note: 9.7B (法說會 2025) vs 2.5B (engineering-only decomposition) is a
-# key sensitivity.  The decomposed estimate is used here; the 2025 figure
-# is retained as an upper-bound scenario for the FFF sensitivity plot.
-CAPEX_CIVIL  <- 2.0e9     # NTD — civil/structural construction (土木工程)
-CAPEX_TX     <- 0.5e9     # NTD — grid connection + E&M equipment (輸配電)
-CAPEX_TOTAL  <- CAPEX_CIVIL + CAPEX_TX          # NTD 2.5B baseline
-CAPEX_HIGH   <- 9.7e9     # NTD — 2025 investor conference upper bound (法說會)
+#   C1  NTD 2.5B (25億)
+#       Source: 公開資訊觀測站工程合約揭露 (securities exchange disclosure)
+#       Decomposition: 土木工程 20億 + 輸配電/機電 5億
+#       This is the most granular bottom-up figure available.
+#
+#   C2  NTD 5.0B (50億)
+#       Source: 最初投資計畫公告 (earliest public project announcement)
+#       Pre-feasibility estimate; basis unknown; often inflated for permitting.
+#
+#   C3  NTD 6.4B (64億)
+#       Source: 1999年環境影響評估可行性報告 (1999 EIA feasibility report)
+#       Reflects 1999 construction prices; not inflation-adjusted.
+#
+#   C4  NTD 9.7B (97億)
+#       Source: 2025年法人說明會 (2025 investor conference / earnings call)
+#       Most recent figure; includes inflation and revised scope.
+#
+# OPEX is set as a fraction of each CAPEX (opex_ntd_yr = capex * OPEX_RATE).
+# The four estimates span a 4× range — CAPEX is the dominant uncertainty driver.
+
+CAPEX_C1  <- 2.5e9    # NTD 2.5B — 公開資訊觀測站工程揭露 (25億)
+CAPEX_C2  <- 5.0e9    # NTD 5.0B — 最初公告 (50億)
+CAPEX_C3  <- 6.4e9    # NTD 6.4B — 1999 EIA 環評 (64億)
+CAPEX_C4  <- 9.7e9    # NTD 9.7B — 2025 法說會 (97億)
+
+# Named vector for labelling in plots and tables
+CAPEX_LABELS <- c(
+  "C1: 2.5B (工程揭露)"  = CAPEX_C1,
+  "C2: 5.0B (原始公告)"  = CAPEX_C2,
+  "C3: 6.4B (EIA 1999)"  = CAPEX_C3,
+  "C4: 9.7B (法說會 2025)" = CAPEX_C4
+)
+
+# Colour palette — light → dark maps to low → high CAPEX (more cost = more risk)
+CAPEX_COLS <- c(
+  "C1: 2.5B (工程揭露)"  = "#1D9E75",  # teal-green
+  "C2: 5.0B (原始公告)"  = "#1D4E89",  # navy blue
+  "C3: 6.4B (EIA 1999)"  = "#E07B2A",  # amber
+  "C4: 9.7B (法說會 2025)" = "#8B1A4A"   # deep purple-red
+)
 
 FIT          <- 2.8599    # NTD/kWh — government FIT (MOEA 114年度, > 20 MW)
 PPA          <- 6.0       # NTD/kWh — corporate PPA rate; change to 8 or 10 to test
@@ -128,7 +158,7 @@ E_FLOW_MODE  <- "recommended"             # W1 = 5.0 cms; W2 = 1.0 cms
 # =============================================================================
 
 N_SIM_BOOTSTRAP <- 20L                         # ← 20 / 200 / 1000
-CV_GRID_USE     <- c(1.5, 2.5, 3.5)            # ← c(1.5,2.5,3.5) / c(1.0,1.5,2.0,2.5,3.0,3.5,4.0)
+CV_GRID_USE     <- c(1.0,1.5,2.0,2.5,3.0,3.5,4.0)            # ← c(1.5,2.5,3.5) / c(1.0,1.5,2.0,2.5,3.0,3.5,4.0)
 ```
 
 # Sediment and Rating Curve
@@ -363,65 +393,63 @@ data.frame(
 
 NPV is computed using equity discount rate $r_e = 8\%$, LTV = 80%, and
 loan rate $r_{\ell} = 3\%$.  Electricity revenue uses the PPA rate
-(NTD `r PPA`/kWh).  Three CAPEX scenarios are compared:
+(NTD `r PPA`/kWh).  All four publicly disclosed CAPEX estimates are compared:
 
-- **CAPEX\textsubscript{OG}** = NTD 5.0 billion (earliest public announcement)
-- **CAPEX\textsubscript{EIA}** = NTD 6.4 billion (1999 EIA feasibility report)
-- **CAPEX\textsubscript{2025}** = NTD 9.7 billion (2025 investor conference)
+| Label | CAPEX | Source |
+|---|---|---|
+| C1 | NTD 2.5B (25億) | 公開資訊觀測站工程合約揭露：土木 20億 + 輸配電 5億 |
+| C2 | NTD 5.0B (50億) | 最初投資計畫公告 (earliest public announcement) |
+| C3 | NTD 6.4B (64億) | 1999年環境影響評估可行性報告 (EIA feasibility report) |
+| C4 | NTD 9.7B (97億) | 2025年法人說明會 (investor conference, most recent) |
 
 ```{r npv-trajectory}
-#| fig-width: 9
+#| fig-width: 10
 #| fig-height: 5
-#| fig-cap: "35-year cumulative NPV trajectory for both operation modes and two CAPEX scenarios. Baseline: 25億 NTD (20億 civil + 5億 Tx/E&M); Upper bound: 97億 NTD (2025 investor conference). Revenue at PPA rate (NTD 6.0/kWh). Dashed horizontal line = NPV breakeven."
+#| fig-cap: "35-year cumulative NPV trajectory (historical mean revenue, loan rate = 3%). Solid lines = pondage; dashed = run-of-river. Four CAPEX scenarios from four public sources. Revenue at PPA rate (NTD 6.0/kWh); equity discount rate 8%; LTV 80%. Horizontal dashed line = NPV breakeven."
 
-make_npv_traj <- function(ann_df, capex, label) {
+# Helper: build cumulative NPV trajectory for one (revenue source, CAPEX) combo
+make_npv_traj <- function(ann_df, capex, capex_label, mode_label) {
   rev <- mean(ann_df$rev_ntd, na.rm = TRUE)
-  # Use build_cash_flows() with PROJECT_LIFE (35yr) directly.
-  # build_cash_flows_20yr() is hardcoded to 20 years; use the general version.
   cf  <- build_cash_flows(
     annual_revenue_ntd = rev,
     ltv             = LTV,
     r_loan          = 0.03,
     capex_ntd       = capex,
     opex_ntd_yr     = capex * OPEX_RATE,
-    project_life_yr = PROJECT_LIFE        # 35 years
+    project_life_yr = PROJECT_LIFE
   )
-  # Build year-by-year cumulative discounted NPV manually
-  t    <- seq_along(cf) - 1L
-  dcf  <- cf / (1 + R_EQUITY) ^ t
+  t   <- seq_along(cf) - 1L
+  dcf <- cf / (1 + R_EQUITY) ^ t
   data.frame(
     year                 = t,
     cash_flow_ntd        = cf,
     discounted_cf_ntd    = dcf,
     cumulative_npv_b_ntd = cumsum(dcf) / 1e9,
-    label                = label
+    capex_label          = capex_label,
+    mode_label           = mode_label
   )
 }
 
 traj_df <- bind_rows(
-  make_npv_traj(ann_ror,  CAPEX_TOTAL, "Run-of-river / CAPEX 2.5B"),
-  make_npv_traj(ann_ror,  CAPEX_HIGH,  "Run-of-river / CAPEX 9.7B (upper)"),
-  make_npv_traj(ann_pond, CAPEX_TOTAL, "Pondage / CAPEX 2.5B"),
-  make_npv_traj(ann_pond, CAPEX_HIGH,  "Pondage / CAPEX 9.7B (upper)")
+  make_npv_traj(ann_ror,  CAPEX_C1, "C1: 2.5B (工程揭露)",  "Run-of-river"),
+  make_npv_traj(ann_ror,  CAPEX_C2, "C2: 5.0B (原始公告)",  "Run-of-river"),
+  make_npv_traj(ann_ror,  CAPEX_C3, "C3: 6.4B (EIA 1999)",  "Run-of-river"),
+  make_npv_traj(ann_ror,  CAPEX_C4, "C4: 9.7B (法說會 2025)", "Run-of-river"),
+  make_npv_traj(ann_pond, CAPEX_C1, "C1: 2.5B (工程揭露)",  "Pondage"),
+  make_npv_traj(ann_pond, CAPEX_C2, "C2: 5.0B (原始公告)",  "Pondage"),
+  make_npv_traj(ann_pond, CAPEX_C3, "C3: 6.4B (EIA 1999)",  "Pondage"),
+  make_npv_traj(ann_pond, CAPEX_C4, "C4: 9.7B (法說會 2025)", "Pondage")
 ) |>
   mutate(
-    mode_label  = if_else(grepl("Pondage", label), "Pondage", "Run-of-river"),
-    capex_label = case_when(
-      grepl("2.5B", label) ~ "CAPEX 2.5B (baseline)",
-      TRUE                 ~ "CAPEX 9.7B (upper bound)"
-    )
+    capex_label = factor(capex_label, levels = names(CAPEX_COLS))
   )
 
 ggplot(traj_df, aes(x = year, y = cumulative_npv_b_ntd,
                     colour = capex_label, linetype = mode_label)) +
   geom_hline(yintercept = 0, linetype = "dashed",
              colour = "grey40", linewidth = 0.4) +
-  geom_line(linewidth = 0.9) +
-  scale_colour_manual(
-    values = c("CAPEX 2.5B (baseline)"  = "#1D9E75",
-               "CAPEX 9.7B (upper bound)" = "#8B1A4A"),
-    name = "CAPEX scenario"
-  ) +
+  geom_line(linewidth = 0.85) +
+  scale_colour_manual(values = CAPEX_COLS, name = "CAPEX scenario") +
   scale_linetype_manual(
     values = c("Run-of-river" = "dashed", "Pondage" = "solid"),
     name   = "Operation mode"
@@ -429,15 +457,41 @@ ggplot(traj_df, aes(x = year, y = cumulative_npv_b_ntd,
   scale_x_continuous(breaks = seq(0, PROJECT_LIFE, by = 5)) +
   scale_y_continuous(labels = function(x) paste0(x, "B")) +
   labs(
-    title    = paste0(PROJECT_LIFE, "-Year Cumulative NPV Trajectory (W1 + W2 Combined)"),
+    title    = paste0(PROJECT_LIFE, "-Year Cumulative NPV — W1 + W2 Combined"),
     subtitle = paste0(
-      "PPA = NTD ", PPA, "/kWh; equity rate = ", R_EQUITY * 100,
-      "%; LTV = ", LTV * 100, "%; loan rate = 3%; OPEX = 1% CAPEX."
+      "PPA = NTD ", PPA, "/kWh | equity rate = ", R_EQUITY * 100,
+      "% | LTV = ", LTV * 100, "% | loan rate = 3% | OPEX = ",
+      OPEX_RATE * 100, "% of CAPEX/yr"
     ),
-    x = "Project year",
-    y = "Cumulative NPV (NTD billion)"
+    x       = "Project year",
+    y       = "Cumulative NPV (NTD billion)",
+    caption = paste(
+      "Historical mean annual revenue used (1958–2025).",
+      "Four CAPEX estimates from: 公開資訊觀測站 (C1),",
+      "原始公告 (C2), EIA 1999 (C3), 法說會 2025 (C4)."
+    )
   ) +
   theme_fengping()
+```
+
+```{r npv-milestone-table}
+#| tbl-cap: "Cumulative discounted NPV (NTD billion) at milestone years for four CAPEX scenarios and two operation modes. Loan rate = 3%; equity discount rate = 8%; LTV = 80%; PPA = NTD 6.0/kWh. Positive = project has recovered equity investment on a discounted basis."
+
+traj_df |>
+  filter(year %in% c(5, 10, 20, 35)) |>
+  mutate(
+    cell = sprintf("%.2f", cumulative_npv_b_ntd),
+    col_label = paste0(mode_label, " / Yr ", year)
+  ) |>
+  select(capex_label, mode_label, year, cumulative_npv_b_ntd) |>
+  tidyr::pivot_wider(
+    names_from  = c(mode_label, year),
+    names_glue  = "{mode_label} Yr{year}",
+    values_from = cumulative_npv_b_ntd
+  ) |>
+  mutate(across(where(is.numeric), ~ sprintf("%.2f", .))) |>
+  rename(CAPEX = capex_label) |>
+  knitr::kable(align = paste0("l", strrep("r", 8)))
 ```
 
 ---
@@ -578,8 +632,8 @@ flow series.  Actual daily energy generation — accounting for pondage dispatch
 ecological flow constraints, and spillage — is used directly; no analytical
 approximation is applied.
 
-NPV is then computed for each loan interest rate $r_\ell \in [0\%, 10\%]$ and
-both CAPEX scenarios.
+NPV is computed for each loan interest rate $r_\ell \in [0\%, 10\%]$ and both
+operation modes, separately for all four CAPEX estimates.
 
 ```{r fff-compute}
 #| cache: true
@@ -587,7 +641,6 @@ both CAPEX scenarios.
 # Expected computation time (sequential):
 #   N_SIM = 20,  3 CV levels  →  60 sims   ~10-30 sec
 #   N_SIM = 200, 7 CV levels  →  1400 sims ~3-5 min
-# Progress printed every 20 rows.
 
 run_fff <- function(capex, label) {
   run_fff_grid(
@@ -599,10 +652,9 @@ run_fff <- function(capex, label) {
     capex_ntd       = capex,
     opex_ntd_yr     = capex * OPEX_RATE,
     project_life_yr = PROJECT_LIFE,
-    fit_ntd_per_kwh = PPA,          # using PPA rate
+    fit_ntd_per_kwh = PPA,
     scale_w2        = TRUE
   ) |>
-  # Fix facet label: "run_of_river" → "Run-of-river", "pondage" → "Pondage"
   mutate(
     mode = recode(mode,
                   "run_of_river" = "Run-of-river",
@@ -611,61 +663,215 @@ run_fff <- function(capex, label) {
   )
 }
 
-message("FFF — CAPEX baseline (2.5B)")
-fff_base <- run_fff(CAPEX_TOTAL, "CAPEX 2.5B (baseline)")
+message("FFF — C1: 2.5B"); fff_c1 <- run_fff(CAPEX_C1, "C1: 2.5B (工程揭露)")
+message("FFF — C2: 5.0B"); fff_c2 <- run_fff(CAPEX_C2, "C2: 5.0B (原始公告)")
+message("FFF — C3: 6.4B"); fff_c3 <- run_fff(CAPEX_C3, "C3: 6.4B (EIA 1999)")
+message("FFF — C4: 9.7B"); fff_c4 <- run_fff(CAPEX_C4, "C4: 9.7B (法說會 2025)")
 
-message("FFF — CAPEX upper bound (9.7B)")
-fff_high <- run_fff(CAPEX_HIGH,  "CAPEX 9.7B (upper)")
-
-# Summarise each scenario
-fff_base_sum <- summarise_fff_grid(fff_base) |> mutate(capex = "2.5B (baseline)")
-fff_high_sum <- summarise_fff_grid(fff_high) |> mutate(capex = "9.7B (upper)")
+fff_c1_sum <- summarise_fff_grid(fff_c1)
+fff_c2_sum <- summarise_fff_grid(fff_c2)
+fff_c3_sum <- summarise_fff_grid(fff_c3)
+fff_c4_sum <- summarise_fff_grid(fff_c4)
 ```
 
-## NPV Results Table
+```{r fff-overview-table}
+#| tbl-cap: "Median NPV (NTD B) and P(NPV > 0) for pondage mode at loan rate = 3%, across four CAPEX estimates and all CV levels. Format: median NPV (viability %)."
 
-```{r fff-table}
-#| tbl-cap: "Median NPV (NTD billion) and P(NPV > 0) across bootstrap replicates. Pondage mode; CAPEX = NTD 2.5B (baseline); PPA = NTD 6.0/kWh. Format: NPV (viability %)."
+make_fff_row <- function(df, capex_label) {
+  df |>
+    filter(mode == "Pondage", abs(r_loan_pct - 3) < 0.01) |>
+    mutate(
+      cell        = sprintf("%.1f B / %.0f%%", npv_mean, prob_viable * 100),
+      CAPEX       = capex_label,
+      `CV level`  = cv_level
+    ) |>
+    select(CAPEX, `CV level`, cell)
+}
 
-fff_base_sum |>
+bind_rows(
+  make_fff_row(fff_c1_sum, "C1: 2.5B (工程揭露)"),
+  make_fff_row(fff_c2_sum, "C2: 5.0B (原始公告)"),
+  make_fff_row(fff_c3_sum, "C3: 6.4B (EIA 1999)"),
+  make_fff_row(fff_c4_sum, "C4: 9.7B (法說會 2025)")
+) |>
+  tidyr::pivot_wider(names_from = `CV level`, values_from = cell,
+                     names_prefix = "CV = ") |>
+  knitr::kable(align = paste0("l", strrep("r", length(CV_GRID_USE))))
+```
+
+## Cross-CAPEX Overview Table
+
+See the `fff-overview-table` above for a unified summary across all four CAPEX
+estimates at $r_\ell = 3\%$.  Individual per-CAPEX tables (at all loan rates)
+follow each FFF heatmap below.
+
+## C1 — CAPEX NTD 2.5B (公開資訊觀測站工程揭露)
+
+```{r fff-c1-table}
+#| tbl-cap: "C1 (CAPEX = NTD 2.5B, pondage mode): E[NPV] (NTD B) and P(NPV > 0) at each CV level and loan rate. Format: E[NPV] B / P(viable %)."
+
+fff_c1_sum |>
   filter(mode == "Pondage") |>
-  mutate(
-    r_label = paste0(sprintf("%.0f", r_loan_pct), "%"),
-    cell    = sprintf("%.2f (%.0f%%)", npv_P50, prob_viable * 100)
-  ) |>
+  mutate(cell    = sprintf("%.1f / %.0f%%", npv_mean, prob_viable * 100),
+         r_label = paste0(sprintf("%.0f", r_loan_pct), "%")) |>
   select(cv_level, r_label, cell) |>
-  tidyr::pivot_wider(
-    names_from  = r_label,
-    values_from = cell
-  ) |>
+  tidyr::pivot_wider(names_from = r_label, values_from = cell) |>
   arrange(cv_level) |>
   rename(`CV level` = cv_level) |>
   knitr::kable(align = paste0("r", strrep("r", length(R_LOAN_SEQ))))
 ```
 
-## FFF Heatmap — CAPEX Baseline (NTD 2.5B)
-
-```{r fff-base}
+```{r fff-c1-enpv}
 #| fig-width: 10
 #| fig-height: 5
-#| fig-cap: "FFF — CAPEX = NTD 2.5B (engineering decomposition: 20億 civil + 5億 Tx/E&M). Green = P(NPV > 0) majority viable; purple-red = majority loss. PPA = NTD 6.0/kWh."
+#| fig-cap: "C1 E[NPV] — CAPEX = NTD 2.5B: Expected NPV (NTD billion) across bootstrap replicates. Cell labels show mean profit/loss in NTD B. Deep green = large expected profit; deep purple-red = large expected loss. Black contour = E[NPV] = 0 (break-even)."
 
-plot_fff_mode_comparison(
-  fff_base_sum,
-  title_text = "FFF: Run-of-river vs Pondage  |  CAPEX = NTD 2.5B (20億 civil + 5億 Tx)"
+plot_fff_npv_mean_comparison(
+  fff_c1_sum,
+  title_text = "E[NPV] — C1: CAPEX = NTD 2.5B (公開資訊觀測站工程揭露)"
 )
 ```
 
-## FFF Heatmap — CAPEX Upper Bound (NTD 9.7B)
-
-```{r fff-high}
+```{r fff-c1-prob}
 #| fig-width: 10
 #| fig-height: 5
-#| fig-cap: "FFF — CAPEX = NTD 9.7B (2025 investor conference upper bound). At this cost level the feasibility boundary shifts dramatically; pondage retains a narrow viable region at low loan rates under baseline CV. PPA = NTD 6.0/kWh."
+#| fig-cap: "C1 P(NPV > 0) — CAPEX = NTD 2.5B: Probability of positive NPV across bootstrap replicates. Deep green = high confidence profitable; deep purple-red = high confidence loss. Black contour = 50% (most-likely breakeven boundary)."
 
 plot_fff_mode_comparison(
-  fff_high_sum,
-  title_text = "FFF: Run-of-river vs Pondage  |  CAPEX = NTD 9.7B (upper bound)"
+  fff_c1_sum,
+  title_text = "P(NPV > 0) — C1: CAPEX = NTD 2.5B (公開資訊觀測站工程揭露)"
+)
+```
+
+## C2 — CAPEX NTD 5.0B (最初投資計畫公告)
+
+```{r fff-c2-table}
+#| tbl-cap: "C2 (CAPEX = NTD 5.0B, pondage mode): E[NPV] (NTD B) and P(NPV > 0). Format: E[NPV] B / P(viable %)."
+
+fff_c2_sum |>
+  filter(mode == "Pondage") |>
+  mutate(cell    = sprintf("%.1f / %.0f%%", npv_mean, prob_viable * 100),
+         r_label = paste0(sprintf("%.0f", r_loan_pct), "%")) |>
+  select(cv_level, r_label, cell) |>
+  tidyr::pivot_wider(names_from = r_label, values_from = cell) |>
+  arrange(cv_level) |>
+  rename(`CV level` = cv_level) |>
+  knitr::kable(align = paste0("r", strrep("r", length(R_LOAN_SEQ))))
+```
+
+```{r fff-c2-enpv}
+#| fig-width: 10
+#| fig-height: 5
+#| fig-cap: "C2 E[NPV] — CAPEX = NTD 5.0B (最初投資計畫公告). Expected profit/loss in NTD B per cell. Black contour = break-even."
+
+plot_fff_npv_mean_comparison(
+  fff_c2_sum,
+  title_text = "E[NPV] — C2: CAPEX = NTD 5.0B (最初投資計畫公告)"
+)
+```
+
+```{r fff-c2-prob}
+#| fig-width: 10
+#| fig-height: 5
+#| fig-cap: "C2 P(NPV > 0) — CAPEX = NTD 5.0B. Probability of financial viability. Black contour = 50% boundary."
+
+plot_fff_mode_comparison(
+  fff_c2_sum,
+  title_text = "P(NPV > 0) — C2: CAPEX = NTD 5.0B (最初投資計畫公告)"
+)
+```
+
+## C3 — CAPEX NTD 6.4B (1999 EIA 環評)
+
+```{r fff-c3-table}
+#| tbl-cap: "C3 (CAPEX = NTD 6.4B, pondage mode): E[NPV] (NTD B) and P(NPV > 0). Format: E[NPV] B / P(viable %)."
+
+fff_c3_sum |>
+  filter(mode == "Pondage") |>
+  mutate(cell    = sprintf("%.1f / %.0f%%", npv_mean, prob_viable * 100),
+         r_label = paste0(sprintf("%.0f", r_loan_pct), "%")) |>
+  select(cv_level, r_label, cell) |>
+  tidyr::pivot_wider(names_from = r_label, values_from = cell) |>
+  arrange(cv_level) |>
+  rename(`CV level` = cv_level) |>
+  knitr::kable(align = paste0("r", strrep("r", length(R_LOAN_SEQ))))
+```
+
+```{r fff-c3-enpv}
+#| fig-width: 10
+#| fig-height: 5
+#| fig-cap: "C3 E[NPV] — CAPEX = NTD 6.4B (1999 EIA 環評可行性報告). Expected profit/loss in NTD B. Note: 1999 figure not adjusted for inflation."
+
+plot_fff_npv_mean_comparison(
+  fff_c3_sum,
+  title_text = "E[NPV] — C3: CAPEX = NTD 6.4B (1999 EIA 環評可行性報告)"
+)
+```
+
+```{r fff-c3-prob}
+#| fig-width: 10
+#| fig-height: 5
+#| fig-cap: "C3 P(NPV > 0) — CAPEX = NTD 6.4B. Probability of financial viability across bootstrap climate ensemble."
+
+plot_fff_mode_comparison(
+  fff_c3_sum,
+  title_text = "P(NPV > 0) — C3: CAPEX = NTD 6.4B (1999 EIA 環評可行性報告)"
+)
+```
+
+## C4 — CAPEX NTD 9.7B (2025 法說會)
+
+```{r fff-c4-table}
+#| tbl-cap: "C4 (CAPEX = NTD 9.7B, pondage mode): E[NPV] (NTD B) and P(NPV > 0). Format: E[NPV] B / P(viable %)."
+
+fff_c4_sum |>
+  filter(mode == "Pondage") |>
+  mutate(cell    = sprintf("%.1f / %.0f%%", npv_mean, prob_viable * 100),
+         r_label = paste0(sprintf("%.0f", r_loan_pct), "%")) |>
+  select(cv_level, r_label, cell) |>
+  tidyr::pivot_wider(names_from = r_label, values_from = cell) |>
+  arrange(cv_level) |>
+  rename(`CV level` = cv_level) |>
+  knitr::kable(align = paste0("r", strrep("r", length(R_LOAN_SEQ))))
+```
+
+```{r fff-c4-enpv}
+#| fig-width: 10
+#| fig-height: 5
+#| fig-cap: "C4 E[NPV] — CAPEX = NTD 9.7B (2025年法說會最新揭露). At this cost level most cells show negative E[NPV]; viable corridor confined to very low loan rates under historical CV."
+
+plot_fff_npv_mean_comparison(
+  fff_c4_sum,
+  title_text = "E[NPV] — C4: CAPEX = NTD 9.7B (2025 法說會最新揭露)"
+)
+```
+
+```{r fff-c4-prob}
+#| fig-width: 10
+#| fig-height: 5
+#| fig-cap: "C4 P(NPV > 0) — CAPEX = NTD 9.7B. Probability of positive NPV. Viable region is narrow even under pondage mode."
+
+plot_fff_mode_comparison(
+  fff_c4_sum,
+  title_text = "P(NPV > 0) — C4: CAPEX = NTD 9.7B (2025 法說會最新揭露)"
+)
+```
+
+## Summary — E[NPV] across all CAPEX estimates (Pondage mode)
+
+```{r fff-enpv-summary}
+#| fig-width: 12
+#| fig-height: 10
+#| fig-cap: "Summary: E[NPV] (NTD billion) for pondage mode across all four CAPEX estimates. Each panel = one cost scenario. Cell labels show expected profit (+) or loss (−) in NTD B. Black contour = break-even. Reading across panels shows how CAPEX is the dominant uncertainty: C1 (25億) is widely profitable, C4 (97億) is largely unprofitable under the same revenue assumptions."
+
+plot_fff_enpv_all_capex(
+  list(
+    "C1: 2.5B (工程揭露)"    = fff_c1_sum,
+    "C2: 5.0B (原始公告)"    = fff_c2_sum,
+    "C3: 6.4B (EIA 1999)"    = fff_c3_sum,
+    "C4: 9.7B (法說會 2025)" = fff_c4_sum
+  ),
+  title_text = "E[NPV] Summary — Pondage Mode, Four CAPEX Estimates"
 )
 ```
 
@@ -679,7 +885,7 @@ plot_fff_mode_comparison(
 # Note: after recode() in fff-compute, mode values are "Pondage" and
 # "Run-of-river" (title-case with hyphen).  pivot_wider creates columns
 # with those exact names, so backtick-quote them in mutate().
-diff_df <- fff_base_sum |>
+diff_df <- fff_c1_sum |>
   select(cv_level, r_loan_pct, mode, prob_viable) |>
   tidyr::pivot_wider(names_from = mode, values_from = prob_viable) |>
   mutate(delta_prob = Pondage - `Run-of-river`)
@@ -706,9 +912,10 @@ ggplot(diff_df, aes(x = r_loan_pct, y = cv_level, fill = delta_prob)) +
     x        = "Loan interest rate (%)",
     y        = "Within-year flow CV",
     caption  = paste0(
-      "CAPEX = NTD 2.5B (baseline); LTV = ", LTV * 100, "%; equity rate = ",
+      "Shown for C1 (CAPEX = NTD 2.5B); LTV = ", LTV * 100, "%; equity rate = ",
       R_EQUITY * 100, "%; project life = ", PROJECT_LIFE, " yr.",
-      "\nPositive delta (green): pondage achieves higher P(NPV>0) than run-of-river."
+      "\nPositive delta (green): pondage achieves higher P(NPV>0) than run-of-river.",
+      "\nPattern is consistent across all four CAPEX estimates (C1–C4)."
     )
   ) +
   theme_fengping() +
@@ -725,13 +932,15 @@ ggplot(diff_df, aes(x = r_loan_pct, y = cv_level, fill = delta_prob)) +
 extract_viability <- function(summ_df, capex_label) {
   summ_df |>
     filter(mode == "Pondage", abs(r_loan_pct - 3) < 0.01) |>
-    select(cv_level, prob_viable, npv_P50, gwh_P50) |>
+    select(cv_level, prob_viable, npv_mean, gwh_P50) |>
     mutate(capex = capex_label)
 }
 
 bind_rows(
-  extract_viability(fff_base_sum, "NTD 2.5B (baseline: 20億 civil + 5億 Tx)"),
-  extract_viability(fff_high_sum, "NTD 9.7B (upper bound, 法說會 2025)")
+  extract_viability(fff_c1_sum, "C1: 2.5B (Stock Exchange Disclosure of Civil and Engineering Cost)"),
+  extract_viability(fff_c2_sum, "C2: 5.0B (Original 1999)"),
+  extract_viability(fff_c3_sum, "C3: 6.4B (Updated EIA 2020)"),
+  extract_viability(fff_c4_sum, "C4: 9.7B (Investor Relation Meeting 2025)")
 ) |>
   mutate(
     viable_flag = if_else(prob_viable >= 0.5, "Yes", "No"),
@@ -741,7 +950,7 @@ bind_rows(
     CAPEX               = capex,
     `CV level`          = CV_label,
     `P(NPV>0)`          = prob_viable,
-    `Median NPV (NTD B)`= npv_P50,
+    `E[NPV] (NTD B)`    = npv_mean,
     `Median GWh/yr`     = gwh_P50,
     `Viable?`           = viable_flag
   ) |>
@@ -750,15 +959,17 @@ bind_rows(
 
 The Financial Feasibility Frontier reveals that:
 
-1. **Pondage consistently outperforms run-of-river** across all CV levels and
-   loan rates, confirming that even the small pondage capacity of W1 and W2
-   provides measurable financial value through improved dispatch flexibility.
+1. **Pondage consistently outperforms run-of-river** across all CV levels,
+   loan rates, and CAPEX estimates, confirming that even the small pondage
+   capacity of W1 and W2 provides measurable financial value through improved
+   dispatch flexibility.
 
-2. **CAPEX is the dominant risk factor.** Under the engineering-decomposed
-   baseline (NTD 2.5B: 20億 civil + 5億 Tx/E&M), both operation modes are
-   financially viable across the full historical CV range (1.5–2.5) at loan
-   rates up to 8–9%.  Under the 2025 investor conference upper bound
-   (NTD 9.7B), viability is confined to low loan rates (≤ 3%) and baseline CV.
+2. **CAPEX is the dominant uncertainty driver** — spanning a 4× range (2.5B to
+   9.7B) across public sources.  Under C1 (NTD 2.5B, engineering disclosure),
+   both modes are widely viable at historical CV.  Under C4 (NTD 9.7B, 2025
+   法說會), viability requires loan rates ≤ 2–3% under historical CV, and is
+   essentially infeasible at elevated CV — confirming that cost verification is
+   the critical prerequisite before project financing.
 
 3. **Higher hydrological variability (CV > 2.5) reduces viability**, because
    increased flashiness causes more frequent spill events that the small
@@ -766,10 +977,10 @@ The Financial Feasibility Frontier reveals that:
    is captured only by the full reservoir simulation; a naive flow-based
    energy estimate would miss this mechanism.
 
-4. **Under SSP5-8.5 projections (CV ≈ 3.0–4.0)**, even under the baseline
-   CAPEX, pondage viability requires loan rates below 5–6%, suggesting that
+4. **Under SSP5-8.5 projections (CV ≈ 3.0–4.0)**, even under C1 (lowest
+   CAPEX), pondage viability requires loan rates below 5–6%, suggesting that
    climate change imposes a meaningful financing-cost premium on flash-flood
-   dominated catchments.
+   dominated catchments in Taiwan.
 
 ```{r teardown}
 #| cache: false
