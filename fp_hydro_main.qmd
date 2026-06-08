@@ -183,6 +183,101 @@ N_SIM_BOOTSTRAP <- 20L                         # ← 20 / 200 / 1000
 CV_GRID_USE     <- c(1.0,1.5,2.0,2.5,3.0,3.5,4.0)            # ← c(1.5,2.5,3.5) / c(1.0,1.5,2.0,2.5,3.0,3.5,4.0)
 ```
 
+# Input Validation & Testing
+
+Before any analysis runs, `run_all_tests()` (sourced from `hydro_test.R`, called in
+the setup chunk) executes four blocks of automated checks — data integrity,
+physical plausibility, custom-function unit tests, and **input validation**
+(`test_input_validation()`). The input-validation block specifically targets
+three risks raised during project review:
+
+1. **Daily flow format** — confirms the cleaned daily-flow file has the expected
+   columns and types (`date` is `Date`, `Q_cms` is numeric), unique and
+   chronologically ordered dates, and no negative/non-finite flow values, so that
+   malformed input is caught immediately rather than silently propagating
+   downstream.
+2. **Sediment data completeness** — quantifies how much of the sediment record
+   is below-detection or missing, and checks whether the sparse field-sampling
+   record could be reconstructed into a continuous daily series.
+3. **NPV scenario inputs** — confirms each finance scenario carries the required
+   fields (including a positive `CAPEX`), that `build_cash_flows()` refuses a
+   scenario with no CAPEX, and that `build_finance_outputs()` returns the
+   expected NPV/IRR/payback structure.
+
+```{r input-validation-report}
+#| cache: false
+
+# ── 1. Daily flow format check ─────────────────────────────────────────────
+fmt_ok <- all(c("date", "Q_cms") %in% names(daily_clean)) &&
+  inherits(daily_clean$date, "Date") &&
+  is.numeric(daily_clean$Q_cms) &&
+  !any(duplicated(daily_clean$date)) &&
+  !is.unsorted(daily_clean$date) &&
+  all(is.finite(daily_clean$Q_cms) & daily_clean$Q_cms >= 0)
+
+cat(sprintf(
+  "Daily flow format check: %s  (%s rows, %s to %s, all Q_cms finite & >= 0)\n",
+  if (fmt_ok) "PASS" else "FAIL",
+  format(nrow(daily_clean), big.mark = ","),
+  min(daily_clean$date), max(daily_clean$date)
+))
+
+# ── 2. Sediment completeness / reconstruction feasibility ──────────────────
+n_sed       <- nrow(sed_clean)
+n_below_det <- sum(sed_clean$flag == "below_detection", na.rm = TRUE)
+n_missing   <- sum(is.na(sed_clean$Sus_Load_MTDay) | is.na(sed_clean$Discharge_CMS))
+
+sed_dates   <- as.Date(sed_clean$date_full)
+pct_covered <- mean(sed_dates >= min(daily_clean$date) &
+                      sed_dates <= max(daily_clean$date), na.rm = TRUE) * 100
+
+cat(sprintf(
+  paste0(
+    "Sediment record: %d samples | %d below-detection (%.1f%%) | ",
+    "%d missing values (%.1f%%)\n",
+    "  -> %.1f%% of sampling dates fall inside the daily-flow record ",
+    "(%s to %s).\n",
+    "  -> Sampling is far sparser than the daily flow record (%d vs %s days), ",
+    "so a continuous daily SSL series cannot be built from sampling alone. ",
+    "Reconstruction IS feasible — and is exactly what build_sediment_outputs() ",
+    "does — by fitting SSL = a*Q^b on the sampled (Q, SSL) pairs ",
+    "(fit_rating_curve) and applying it to the continuous daily flow record ",
+    "(estimate_daily_ssl).\n"
+  ),
+  n_sed, n_below_det, n_below_det / n_sed * 100,
+  n_missing, n_missing / n_sed * 100,
+  pct_covered, min(daily_clean$date), max(daily_clean$date),
+  n_sed, format(nrow(daily_clean), big.mark = ",")
+))
+
+# ── 3. NPV scenario input check (format + CAPEX) ───────────────────────────
+capex_present <- !is.null(.FIN$capex_ntd) && is.numeric(.FIN$capex_ntd) && .FIN$capex_ntd > 0
+
+no_capex_rejected <- tryCatch({
+  build_cash_flows(annual_revenue_ntd = 1e9, capex_ntd = NA_real_)
+  FALSE
+}, error = function(e) TRUE)
+
+scenario_check <- build_finance_outputs(annual_gwh = 80, scenario_label = "format_check")
+scenario_ok <- is.list(scenario_check) &&
+  all(c("annual_revenue_ntd", "cash_flows", "npv_ntd", "irr_pct",
+        "payback_yr", "sensitivity") %in% names(scenario_check)) &&
+  is.numeric(scenario_check$npv_ntd) && is.finite(scenario_check$npv_ntd)
+
+cat(sprintf(
+  paste0(
+    "NPV scenario input check:\n",
+    "  -> CAPEX present and positive (NTD %.2fB): %s\n",
+    "  -> Scenario lacking CAPEX is correctly rejected: %s\n",
+    "  -> build_finance_outputs() returns correctly-formatted NPV/IRR/payback output: %s\n"
+  ),
+  .FIN$capex_ntd / 1e9,
+  if (capex_present) "PASS" else "FAIL",
+  if (no_capex_rejected) "PASS" else "FAIL",
+  if (scenario_ok) "PASS" else "FAIL"
+))
+```
+
 # Sediment and Rating Curve
 
 ## Suspended Sediment Rating Curve

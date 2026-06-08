@@ -13,6 +13,7 @@
 #   test_data_integrity()     # run data tests only
 #   test_physical_bounds()    # run physics tests only
 #   test_custom_functions()   # run unit tests only (required by assignment)
+#   test_input_validation()   # daily-flow format, sediment completeness, NPV/CAPEX checks
 # =============================================================================
 
 library(tidyverse)
@@ -199,6 +200,124 @@ test_physical_bounds <- function() {
 
 
 # =============================================================================
+# TEST BLOCK 4 — Input validation
+#   (a) daily flow file format         — catches malformed/incorrect input
+#   (b) sediment record completeness   — quantifies missingness, checks
+#                                         whether reconstruction from the
+#                                         rating curve + daily flow is viable
+#   (c) NPV scenario inputs            — correct format and CAPEX present
+# =============================================================================
+
+test_input_validation <- function() {
+
+  message("\n── TEST BLOCK 4: Input validation ───────────────────────────")
+
+  # --- 4a. Daily flow format -------------------------------------------------
+  daily <- read_csv(here("data", "lishan_daily_clean.csv"),
+                    show_col_types = FALSE) |>
+    mutate(date = as.Date(date))
+
+  assert_true("T4-1  daily flow: required columns present (date, Q_cms)",
+              all(c("date", "Q_cms") %in% names(daily)))
+
+  assert_true("T4-2  daily flow: date column is Date class, no NA dates",
+              inherits(daily$date, "Date") && sum(is.na(daily$date)) == 0)
+
+  assert_true("T4-3  daily flow: Q_cms is numeric",
+              is.numeric(daily$Q_cms))
+
+  assert_true("T4-4  daily flow: dates are unique (no duplicate days)",
+              !any(duplicated(daily$date)))
+
+  assert_true("T4-5  daily flow: dates are in chronological order",
+              !is.unsorted(daily$date))
+
+  assert_true("T4-6  daily flow: no negative or non-finite Q values",
+              all(is.finite(daily$Q_cms) & daily$Q_cms >= 0))
+
+  # --- 4b. Sediment record completeness -------------------------------------
+  sed <- read_csv(here("data", "sediment_clean.csv"),
+                  show_col_types = FALSE)
+
+  n_total      <- nrow(sed)
+  n_below_det  <- sum(sed$flag == "below_detection", na.rm = TRUE)
+  n_missing    <- sum(is.na(sed$Sus_Load_MTDay) | is.na(sed$Discharge_CMS))
+  pct_below    <- n_below_det / n_total * 100
+  pct_missing  <- n_missing   / n_total * 100
+
+  message(sprintf(
+    "  Sediment record: %d rows | %d below-detection (%.1f%%) | %d missing values (%.1f%%)",
+    n_total, n_below_det, pct_below, n_missing, pct_missing
+  ))
+
+  # Sampling is sparse (~2x/month) compared to the daily flow record.
+  # Reconstruction of a continuous daily SSL series from sampling alone is
+  # not possible — but estimate_daily_ssl() shows it CAN be reconstructed
+  # by combining the fitted rating curve (from sampling data) with the
+  # continuous daily flow record. We confirm here that the daily flow
+  # record fully covers the sediment sampling period, which is the
+  # precondition for that reconstruction to work.
+  sed_dates <- as.Date(sed$date_full)
+  covered   <- sed_dates >= min(daily$date) & sed_dates <= max(daily$date)
+  pct_covered <- mean(covered, na.rm = TRUE) * 100
+
+  message(sprintf(
+    "  %.1f%% of sediment sampling dates fall within the daily flow record (%s to %s).",
+    pct_covered, min(daily$date), max(daily$date)
+  ))
+  message(
+    "  -> Sediment sampling is far sparser than the daily flow record, so a ",
+    "continuous daily SSL series cannot be built from sampling alone. ",
+    "Reconstruction IS feasible by fitting SSL = a*Q^b on the sampled ",
+    "(Q, SSL) pairs (fit_rating_curve) and applying it to the continuous ",
+    "daily flow series (estimate_daily_ssl) — exactly the approach used ",
+    "in build_sediment_outputs()."
+  )
+
+  assert_range("T4-7  sediment: missing-value rate is below 50%",
+               pct_missing, 0, 50)
+
+  assert_range("T4-8  sediment: sampling dates are covered by the daily flow record (>= 95%)",
+               pct_covered, 95, 100)
+
+  # --- 4c. NPV scenario inputs: format and CAPEX presence -------------------
+
+  assert_true("T4-9  finance constants: CAPEX is present and positive",
+              !is.null(.FIN$capex_ntd) && is.numeric(.FIN$capex_ntd) &&
+                .FIN$capex_ntd > 0)
+
+  assert_true("T4-10 finance constants: OPEX, project life and rates present",
+              all(c("opex_ntd_yr", "project_life_yr",
+                    "ltv_default", "r_loan_default", "r_equity") %in% names(.FIN)))
+
+  # A scenario must supply CAPEX before build_cash_flows()/compute_npv() can run.
+  assert_error_msg <- tryCatch({
+    build_cash_flows(annual_revenue_ntd = 1e9, capex_ntd = NA_real_)
+    NULL
+  }, error = function(e) e$message)
+
+  assert_true("T4-11 build_cash_flows() rejects a scenario with no CAPEX (NA)",
+              !is.null(assert_error_msg))
+
+  scenario_out <- build_finance_outputs(annual_gwh = 80, scenario_label = "validation_check")
+
+  assert_true("T4-12 build_finance_outputs(): output is a named list with the expected fields",
+              is.list(scenario_out) &&
+                all(c("annual_revenue_ntd", "cash_flows", "npv_ntd",
+                      "irr_pct", "payback_yr", "sensitivity") %in% names(scenario_out)))
+
+  assert_true("T4-13 build_finance_outputs(): cash_flows[1] is the negative CAPEX-equity outflow",
+              is.numeric(scenario_out$cash_flows) &&
+                scenario_out$cash_flows[1] < 0)
+
+  assert_true("T4-14 build_finance_outputs(): npv_ntd is a finite numeric scalar",
+              is.numeric(scenario_out$npv_ntd) &&
+                length(scenario_out$npv_ntd) == 1L &&
+                is.finite(scenario_out$npv_ntd))
+}
+
+
+# =============================================================================
 # TEST BLOCK 3 — Unit tests for custom functions (assignment requirement)
 # =============================================================================
 
@@ -303,6 +422,11 @@ run_all_tests <- function() {
   
   results[["custom_functions"]] <- tryCatch({
     test_custom_functions()
+    "ALL PASS"
+  }, error = function(e) e$message)
+
+  results[["input_validation"]] <- tryCatch({
+    test_input_validation()
     "ALL PASS"
   }, error = function(e) e$message)
   
