@@ -382,6 +382,32 @@ plot_mcfi_comparison <- function(mcfi_df) {
 # Returns  ggplot object
 # -----------------------------------------------------------------------------
 
+#' Plot reservoir trap-efficiency and storage-loss trajectories for both weirs
+#'
+#' Builds a side-by-side comparison plot of (1) trap efficiency (TE) and
+#' (2) remaining effective storage over the project lifetime, for the two
+#' Fengping weirs (W1, lower plant; W2, upper plant). Intended to visualise
+#' the output of \code{\link{estimate_trap_efficiency}} for the methods /
+#' results section of the report.
+#'
+#' @param trap_W1 A \code{data.frame}, the output of
+#'   \code{estimate_trap_efficiency(..., weir_id = "W1")}, with at least the
+#'   columns \code{year}, \code{TE}, and \code{S_remaining_m3}.
+#' @param trap_W2 A \code{data.frame} with the same structure as
+#'   \code{trap_W1}, for weir W2.
+#'
+#' @return A combined \code{patchwork}/\code{ggplot} object with two panels:
+#'   trap efficiency (\%) over project year (left) and remaining storage
+#'   (million m\eqn{^3}) over project year (right), one line per weir.
+#'
+#' @examples
+#' \dontrun{
+#' trap_W1 <- estimate_trap_efficiency(ssl_annual_mt = 50000, weir_id = "W1")
+#' trap_W2 <- estimate_trap_efficiency(ssl_annual_mt = 50000, weir_id = "W2")
+#' plot_trap_efficiency(trap_W1, trap_W2)
+#' }
+#'
+#' @export
 plot_trap_efficiency <- function(trap_W1, trap_W2) {
   
   df <- bind_rows(

@@ -219,6 +219,47 @@ compute_rbi <- function(Q_vec) {
 #     n_valid    integer   days with non-NA flow
 # -----------------------------------------------------------------------------
 
+#' Compute year-by-year streamflow summary statistics
+#'
+#' Splits a daily streamflow record into calendar years and computes, for
+#' each year, the mean, standard deviation, within-year coefficient of
+#' variation (CV), low- and high-flow percentiles, annual maximum, and the
+#' Richards-Baker Flashiness Index (RBI). The within-year CV is the primary
+#' variability indicator used as the Y-axis of the Financial Feasibility
+#' Frontier (FFF) elsewhere in this analysis.
+#'
+#' \deqn{CV = \frac{sd(Q)}{mean(Q)}}
+#'
+#' @param daily_flow A \code{data.frame} of daily streamflow with at least
+#'   the columns:
+#'   \describe{
+#'     \item{date}{\code{Date}. Calendar date of the observation.}
+#'     \item{Q_cms}{Numeric. Daily mean streamflow (cubic metres per second).}
+#'   }
+#'
+#' @return A \code{data.frame} with one row per calendar year and columns:
+#'   \describe{
+#'     \item{year}{Integer. Calendar year.}
+#'     \item{mu_Q}{Numeric. Annual mean daily flow (cms).}
+#'     \item{sd_Q}{Numeric. Annual standard deviation of daily flow (cms).}
+#'     \item{cv_Q}{Numeric. Within-year coefficient of variation, \code{sd_Q / mu_Q}.}
+#'     \item{Q05}{Numeric. 5th percentile of daily flow — dry-season proxy (cms).}
+#'     \item{Q95}{Numeric. 95th percentile of daily flow — flood proxy (cms).}
+#'     \item{max_Q}{Numeric. Annual maximum daily flow (cms).}
+#'     \item{rbi}{Numeric. Richards-Baker Flashiness Index (dimensionless, 0-1).}
+#'     \item{n_days}{Integer. Total calendar days in the year.}
+#'     \item{n_valid}{Integer. Days with non-\code{NA} flow.}
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' daily  <- read_csv(here("data", "lishan_daily_clean.csv")) |>
+#'   mutate(date = as.Date(date))
+#' stats  <- compute_annual_stats(daily)
+#' head(stats[, c("year", "mu_Q", "cv_Q", "rbi")])
+#' }
+#'
+#' @export
 compute_annual_stats <- function(daily_flow) {
 
   stopifnot(
