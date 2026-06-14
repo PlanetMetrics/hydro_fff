@@ -275,6 +275,51 @@ fit_rating_curve <- function(sed_clean, plot_fit = TRUE) {
 #   data.frame: date, Q_cms, SSL_mt_day (metric tonnes per day)
 # -----------------------------------------------------------------------------
 
+#' Estimate daily suspended sediment load from the daily flow record
+#'
+#' Applies a fitted power-law sediment rating curve
+#' (\eqn{SSL = a \cdot Q^b}, from \code{\link{fit_rating_curve}}) to a
+#' continuous daily streamflow series to produce a daily suspended sediment
+#' load (SSL) estimate. This is the step that "matches" the sparse field
+#' sediment-sampling record (used to fit \code{a} and \code{b}) to the
+#' continuous daily flow record, producing a continuous daily SSL series.
+#'
+#' Days where \code{Q_cms} is below \code{Q_min_transport} are assigned
+#' \code{SSL_mt_day = 0}, consistent with field observations where
+#' sediment concentration (ppm) = 0 during low-flow periods.
+#'
+#' @param daily_flow A \code{data.frame} with columns:
+#'   \describe{
+#'     \item{date}{\code{Date}. Calendar date.}
+#'     \item{Q_cms}{Numeric. Daily mean streamflow (cms).}
+#'   }
+#' @param curve A named list, the output of \code{\link{fit_rating_curve}},
+#'   containing at least \code{$a} and \code{$b} (the rating-curve
+#'   coefficient and exponent).
+#' @param Q_min_transport Numeric. Streamflow (cms) below which sediment
+#'   transport is assumed negligible and \code{SSL_mt_day} is set to 0.
+#'   Default \code{5.0}.
+#'
+#' @return A \code{data.frame} with one row per input day and columns:
+#'   \describe{
+#'     \item{date}{Date}
+#'     \item{Q_cms}{Numeric. Daily mean streamflow (cms), unchanged from input.}
+#'     \item{SSL_mt_day}{Numeric. Estimated suspended sediment load
+#'       (metric tonnes / day), \code{= curve$a * Q_cms ^ curve$b} when
+#'       \code{Q_cms >= Q_min_transport}, otherwise \code{0}.}
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' sed   <- read_csv(here("data", "sediment_clean.csv"))
+#' curve <- fit_rating_curve(sed, plot_fit = FALSE)
+#' daily <- read_csv(here("data", "lishan_daily_clean.csv")) |>
+#'   mutate(date = as.Date(date))
+#' daily_ssl <- estimate_daily_ssl(daily, curve)
+#' head(daily_ssl)
+#' }
+#'
+#' @export
 estimate_daily_ssl <- function(daily_flow,
                                curve,
                                Q_min_transport = 5.0) {

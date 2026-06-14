@@ -3,13 +3,13 @@
 # Master test runner — Fengping River Hydropower Simulation
 #
 # Usage (from project root in R console)
-#   source(here::here("tests", "run_all_tests.R"))
+#   source(here::here("module", "run_all_tests.R"))
 #
 # Alternatively, run a single file:
-#   testthat::test_file(here::here("tests", "test_fill_daily_na.R"))
+#   testthat::test_file(here::here("module", "test_fill_daily_na.R"))
 #
 # What this file does
-#   Calls testthat::test_dir() on the tests/ folder, which automatically
+#   Calls testthat::test_dir() on the module/ folder, which automatically
 #   discovers and runs every file matching the pattern test_*.R.
 #   Results are printed to the console; the function stops with an error
 #   if any test fails.
@@ -47,7 +47,7 @@ cat("  Using testthat", as.character(packageVersion("testthat")), "\n")
 cat("================================================================\n\n")
 
 results <- testthat::test_dir(
-  path    = here("tests"),
+  path    = here("module"),
   reporter = testthat::default_reporter()
 )
 

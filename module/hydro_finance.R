@@ -279,6 +279,33 @@ build_cash_flows <- function(annual_revenue_ntd,
 #   numeric scalar   NPV in NTD
 # -----------------------------------------------------------------------------
 
+#' Calculate net present value (NPV) of a cash-flow stream
+#'
+#' Discounts a vector of cash flows back to year 0 using a constant discount
+#' rate and sums them. \code{cash_flows[1]} is conventionally the year-0
+#' equity outflow (negative, including CAPEX), and the remaining elements
+#' are the net cash flows for years 1 through T (as produced by
+#' \code{\link{build_cash_flows}}).
+#'
+#' \deqn{NPV = \sum_{t=0}^{T} \frac{CF_t}{(1 + r)^t}}
+#'
+#' @param cash_flows Numeric vector of length >= 2. \code{cash_flows[1]} is
+#'   the year-0 cash flow (typically the negative equity portion of CAPEX);
+#'   \code{cash_flows[2:length(cash_flows)]} are the year 1...T cash flows.
+#' @param discount_rate Numeric. The discount rate (fraction, e.g.
+#'   \code{0.08} = 8\%). Default \code{.FIN$r_equity}.
+#'
+#' @return Numeric scalar. The net present value, in the same currency units
+#'   as \code{cash_flows} (NTD throughout this project).
+#'
+#' @examples
+#' \dontrun{
+#' # CAPEX of 1000 (year 0), then 300/yr for 4 years
+#' cf <- c(-1000, 300, 300, 300, 300)
+#' compute_npv(cf, discount_rate = 0.08)
+#' }
+#'
+#' @export
 compute_npv <- function(cash_flows,
                         discount_rate = .FIN$r_equity) {
   
